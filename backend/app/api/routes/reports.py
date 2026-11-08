@@ -1,0 +1,29 @@
+from fastapi import APIRouter, BackgroundTasks
+
+from app.core.supabase import get_supabase
+from app.services.report import generate_daily_report
+
+router = APIRouter(prefix="/relatorios", tags=["relatorios"])
+
+
+@router.get("/erros")
+async def list_erros(data: str | None = None):
+    """Lista relatórios de erro. Filtra por data (YYYY-MM-DD) se fornecida."""
+    supabase = get_supabase()
+    query = (
+        supabase.schema("gestao_docs")
+        .from_("relatorio_erro")
+        .select("*, empresa:empresa_id(nome), documento:documento_id(nome_arquivo)")
+        .order("data", desc=True)
+    )
+    if data:
+        query = query.gte("data", data).lt("data", data + "T23:59:59")
+    res = query.limit(200).execute()
+    return res.data or []
+
+
+@router.post("/disparar")
+async def disparar_relatorio(background_tasks: BackgroundTasks):
+    """Dispara o relatório diário manualmente (apenas gestores devem chamar)."""
+    background_tasks.add_task(generate_daily_report)
+    return {"ok": True, "message": "Relatório sendo gerado em segundo plano"}
