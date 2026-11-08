@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks
 
 from app.core.supabase import get_supabase
+from app.services.monitor import run_monitor
 from app.services.report import generate_daily_report
 
 router = APIRouter(prefix="/relatorios", tags=["relatorios"])
@@ -27,3 +28,10 @@ async def disparar_relatorio(background_tasks: BackgroundTasks):
     """Dispara o relatório diário manualmente (apenas gestores devem chamar)."""
     background_tasks.add_task(generate_daily_report)
     return {"ok": True, "message": "Relatório sendo gerado em segundo plano"}
+
+
+@router.post("/monitor/executar")
+async def disparar_monitor(background_tasks: BackgroundTasks):
+    """Dispara o monitoramento do Drive manualmente."""
+    background_tasks.add_task(run_monitor)
+    return {"ok": True, "message": "Monitor do Drive iniciado em segundo plano"}
