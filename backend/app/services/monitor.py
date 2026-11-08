@@ -15,12 +15,11 @@ async def run_monitor() -> None:
     supabase = get_supabase()
 
     # Busca empresas com folder_id configurado no modo ativo
-    config_res = supabase.schema("gestao_docs").from_("configuracao_sistema").select("modo_ficticio").limit(1).execute()
+    config_res = supabase.from_("configuracao_sistema").select("modo_ficticio").limit(1).execute()
     modo_ficticio = (config_res.data or [{}])[0].get("modo_ficticio", False)
 
     empresas_res = (
-        supabase.schema("gestao_docs")
-        .from_("empresa")
+        supabase.from_("empresa")
         .select("id, pasta_id_drive, ultima_verificacao_em")
         .eq("ficticio", modo_ficticio)
         .not_.is_("pasta_id_drive", "null")
@@ -46,8 +45,7 @@ async def _process_empresa_folder(supabase, empresa: dict, modo_ficticio: bool) 
     for file_meta in new_files:
         # Deduplicação: pula se já existe no banco
         exists = (
-            supabase.schema("gestao_docs")
-            .from_("documento")
+            supabase.from_("documento")
             .select("id")
             .eq("arquivo_id_drive", file_meta.id)
             .execute()
@@ -58,7 +56,7 @@ async def _process_empresa_folder(supabase, empresa: dict, modo_ficticio: bool) 
         await _process_file(supabase, file_meta, empresa_id, modo_ficticio)
 
     # Atualiza timestamp da última verificação
-    supabase.schema("gestao_docs").from_("empresa").update(
+    supabase.from_("empresa").update(
         {"ultima_verificacao_em": datetime.now(timezone.utc).isoformat()}
     ).eq("id", empresa_id).execute()
 
@@ -89,11 +87,11 @@ async def _process_file(supabase, file_meta, empresa_id: str, modo_ficticio: boo
         "classificado_em": datetime.now(timezone.utc).isoformat() if result else None,
     }
 
-    doc_res = supabase.schema("gestao_docs").from_("documento").insert(doc_data).execute()
+    doc_res = supabase.from_("documento").insert(doc_data).execute()
     doc_id = (doc_res.data or [{}])[0].get("id")
 
     if status == DocumentoStatus.nao_reconhecido and doc_id:
-        supabase.schema("gestao_docs").from_("fila_revisao").insert(
+        supabase.from_("fila_revisao").insert(
             {"documento_id": doc_id}
         ).execute()
         logger.info("Documento %s adicionado à fila de revisão", doc_id)

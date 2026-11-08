@@ -12,8 +12,7 @@ async def list_erros(data: str | None = None):
     """Lista relatórios de erro. Filtra por data (YYYY-MM-DD) se fornecida."""
     supabase = get_supabase()
     query = (
-        supabase.schema("gestao_docs")
-        .from_("relatorio_erro")
+        supabase.from_("relatorio_erro")
         .select("*, empresa:empresa_id(nome), documento:documento_id(nome_arquivo)")
         .order("data", desc=True)
     )
