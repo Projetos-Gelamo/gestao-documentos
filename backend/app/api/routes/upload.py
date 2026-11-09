@@ -163,8 +163,8 @@ async def upload_documento(
         logger.error("Erro ao inserir documento: %s", exc)
         raise HTTPException(status_code=500, detail=f"Erro ao salvar metadados: {exc}")
 
-    # Documento não reconhecido → fila de revisão
-    na_fila = status == DocumentoStatus.nao_reconhecido
+    # Fila de revisão: documentos não reconhecidos e empresa errada
+    na_fila = status in (DocumentoStatus.nao_reconhecido, DocumentoStatus.empresa_errada)
     if na_fila:
         try:
             supabase.schema("gestao_docs").from_("fila_revisao").insert(
@@ -172,6 +172,24 @@ async def upload_documento(
             ).execute()
         except Exception as exc:
             logger.warning("Erro ao inserir na fila de revisão: %s", exc)
+
+    # Relatório de erro: nao_reconhecido, empresa_errada, duplicata
+    _TIPO_ERRO_MAP = {
+        DocumentoStatus.nao_reconhecido: "pendente_revisao",
+        DocumentoStatus.empresa_errada:   "pasta_errada",
+        DocumentoStatus.duplicata:        "pasta_errada",
+    }
+    tipo_erro = _TIPO_ERRO_MAP.get(status)
+    if tipo_erro:
+        try:
+            supabase.schema("gestao_docs").from_("relatorio_erro").insert({
+                "data": datetime.now().isoformat(),
+                "empresa_id": empresa_id,
+                "documento_id": doc_id,
+                "tipo_erro": tipo_erro,
+            }).execute()
+        except Exception as exc:
+            logger.warning("Erro ao registrar relatorio_erro: %s", exc)
 
     return UploadResult(
         id=doc_id,
