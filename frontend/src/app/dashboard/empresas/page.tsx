@@ -1,8 +1,8 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 
 export default async function EmpresasPage() {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
   const { data: empresas } = await supabase
     .schema("gestao_docs")
     .from("empresa")

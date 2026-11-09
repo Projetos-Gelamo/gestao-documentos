@@ -1,7 +1,7 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export default async function DashboardPage() {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
 
   const [empresasRes, pendentesRes, revisaoRes] = await Promise.all([
     supabase.schema("gestao_docs").from("empresa").select("id", { count: "exact", head: true }),

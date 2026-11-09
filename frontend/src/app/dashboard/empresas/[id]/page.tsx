@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { notFound } from "next/navigation";
 
 const statusLabel: Record<string, string> = {
@@ -21,7 +21,7 @@ const statusColor: Record<string, string> = {
 
 export default async function EmpresaDetalhe({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAdminClient();
 
   const [empresaRes, documentosRes] = await Promise.all([
     supabase.schema("gestao_docs").from("empresa").select("nome, cnpj, codigo").eq("id", id).single(),
