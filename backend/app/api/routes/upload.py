@@ -68,8 +68,16 @@ async def upload_documento(
     file_id = str(uuid.uuid4())[:8]
     storage_path = f"{empresa_id}/{mes_upload}/{file_id}_{filename}"
 
-    # Salva no Storage
+    # Busca CNPJ da empresa destino para validação posterior
     supabase = get_supabase()
+    cnpj_empresa: str | None = None
+    try:
+        emp_res = supabase.schema("gestao_docs").from_("empresa").select("cnpj").eq("id", empresa_id).single().execute()
+        cnpj_empresa = emp_res.data.get("cnpj") if emp_res.data else None
+    except Exception:
+        pass
+
+    # Salva no Storage
     try:
         supabase.storage.from_(STORAGE_BUCKET).upload(
             path=storage_path,
@@ -84,9 +92,30 @@ async def upload_documento(
     text = extract_text(content, filename)
     result, status = await classify_document(text, filename)
 
-    # Detecta duplicata: mesmo empresa + tipo + mes + banco (fuzzy) + conta
+    # Valida CNPJ: documento pertence a esta empresa?
+    empresa_errada = False
+    if (
+        result.cnpj
+        and cnpj_empresa
+        and status not in (DocumentoStatus.nao_reconhecido,)
+        and result.confidence >= 0.80
+    ):
+        def _normaliza_cnpj(c: str) -> str:
+            return "".join(ch for ch in c if ch.isdigit())
+
+        cnpj_doc = _normaliza_cnpj(result.cnpj)
+        cnpj_emp = _normaliza_cnpj(cnpj_empresa)
+        if cnpj_doc and cnpj_emp and cnpj_doc != cnpj_emp:
+            empresa_errada = True
+            status = DocumentoStatus.empresa_errada
+            logger.warning(
+                "Empresa errada: doc CNPJ=%s, empresa CNPJ=%s (empresa_id=%s)",
+                cnpj_doc, cnpj_emp, empresa_id,
+            )
+
+    # Detecta duplicata: mesmo empresa + tipo + mes + banco (fuzzy) + conta (só se não for empresa errada)
     duplicata_de: str | None = None
-    if result.doc_type and result.doc_type != "nao_reconhecido" and result.mes_referencia:
+    if not empresa_errada and result.doc_type and result.doc_type != "nao_reconhecido" and result.mes_referencia:
         try:
             q = (
                 supabase.schema("gestao_docs")
@@ -158,4 +187,5 @@ async def upload_documento(
         na_fila_revisao=na_fila,
         nome_sugerido=_nome_sugerido(result.doc_type, result.mes_referencia, result.banco, result.conta),
         duplicata_de=duplicata_de,
+        cnpj_empresa_esperado=cnpj_empresa if empresa_errada else None,
     )

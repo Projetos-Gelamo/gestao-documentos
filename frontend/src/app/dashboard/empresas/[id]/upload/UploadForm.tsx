@@ -32,6 +32,7 @@ type UploadResult = {
   na_fila_revisao: boolean;
   nome_sugerido: string | null;
   duplicata_de: string | null;
+  cnpj_empresa_esperado: string | null;
 };
 
 export default function UploadForm({ empresaId, empresaNome }: { empresaId: string; empresaNome: string }) {
@@ -165,32 +166,52 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 }
 
 function ResultCard({ result }: { result: UploadResult }) {
+  const isEmpresaErrada = result.status === "empresa_errada";
   const isDup = result.status === "duplicata";
   const isRevision = result.na_fila_revisao;
-  const bg = isDup ? "#fff7ed" : isRevision ? "#fef3c7" : "#f0fdf4";
-  const border = isDup ? "#fed7aa" : isRevision ? "#fde68a" : "#bbf7d0";
-  const icon = isDup ? "⚠ DUPLICATA detectada" : isRevision ? "⚠ Não identificado — aguarda revisão" : "✓ Documento classificado";
+
+  const bg = isEmpresaErrada ? "#fef2f2"
+    : isDup ? "#fff7ed"
+    : isRevision ? "#fef3c7"
+    : "#f0fdf4";
+  const border = isEmpresaErrada ? "#fecaca"
+    : isDup ? "#fed7aa"
+    : isRevision ? "#fde68a"
+    : "#bbf7d0";
+  const icon = isEmpresaErrada ? "🚨 DOCUMENTO NÃO PERTENCE A ESTA EMPRESA"
+    : isDup ? "⚠ DUPLICATA detectada"
+    : isRevision ? "⚠ Não identificado — aguarda revisão"
+    : "✓ Documento classificado";
+
   return (
     <div style={{ marginTop: 20, background: bg, border: `1px solid ${border}`, borderRadius: 10, padding: 20 }}>
-      <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, color: isDup ? "#c2410c" : undefined }}>
+      <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, color: isEmpresaErrada ? "#b91c1c" : isDup ? "#c2410c" : undefined }}>
         {icon}
       </p>
+
+      {isEmpresaErrada && (
+        <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, padding: "10px 14px", fontSize: 13, color: "#7f1d1d", marginBottom: 14, lineHeight: 1.6 }}>
+          <strong>O CNPJ extraído do documento ({result.cnpj}) não corresponde ao CNPJ desta empresa ({result.cnpj_empresa_esperado}).</strong>
+          <br />
+          Este documento foi salvo, mas marcado como <em>empresa errada</em>. Verifique se foi enviado para a empresa correta.
+        </div>
+      )}
+
       {isDup && (
         <div style={{ background: "#ffedd5", border: "1px solid #fed7aa", borderRadius: 6, padding: "8px 12px", fontSize: 13, color: "#9a3412", marginBottom: 12 }}>
           Já existe um documento do mesmo tipo, banco e mês registrado para esta empresa.
-          O arquivo foi salvo, mas marcado como duplicata para sua revisão.
+          Arquivo salvo como duplicata para sua revisão.
         </div>
       )}
+
       <Row label="Arquivo" value={result.nome_arquivo} />
       <Row label="Tipo identificado" value={result.tipo ? (TIPO_LABEL[result.tipo] ?? result.tipo) : "—"} />
+      {result.cnpj && <Row label="CNPJ no documento" value={result.cnpj} highlight={isEmpresaErrada} />}
       {result.banco && <Row label="Banco" value={result.banco} />}
       {result.conta && <Row label="Conta" value={result.conta} />}
       <Row label="Período" value={result.mes_referencia ? _mesPtBR(result.mes_referencia) : "—"} />
-      {result.nome_sugerido && <Row label="Nome sugerido" value={result.nome_sugerido} highlight />}
+      {result.nome_sugerido && !isEmpresaErrada && <Row label="Nome sugerido" value={result.nome_sugerido} highlight />}
       <Row label="Confiança" value={`${(result.confidence * 100).toFixed(0)}%`} />
-      {isDup && result.duplicata_de && (
-        <Row label="Duplica documento" value={result.duplicata_de.substring(0, 8) + "..."} />
-      )}
     </div>
   );
 }
