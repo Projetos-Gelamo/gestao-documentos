@@ -53,7 +53,10 @@ async def _process_empresa_folder(supabase, empresa: dict, modo_ficticio: bool) 
         if exists.data:
             continue
 
-        await _process_file(supabase, file_meta, empresa_id, modo_ficticio)
+        try:
+            await _process_file(supabase, file_meta, empresa_id, modo_ficticio)
+        except Exception as exc:
+            logger.error("Erro ao processar arquivo %s: %s", file_meta.name, exc)
 
     # Atualiza timestamp da última verificação
     supabase.schema("gestao_docs").from_("empresa").update(
