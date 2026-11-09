@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import UploadForm from "./UploadForm";
+// v2 — multi-upload com fila
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
