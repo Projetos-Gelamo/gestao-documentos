@@ -26,7 +26,7 @@ class ClaudeProvider(DocumentClassifier):
         logger.warning("CLASSIFY_DEBUG '%s': text_len=%d preview=%r", filename, len(text), text[:80])
         prompt = _load_prompt(filename, text)
         message = await self._client.messages.create(
-            model="claude-haiku-4-5",
+            model="claude-haiku-5-5",
             max_tokens=256,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -36,7 +36,12 @@ class ClaudeProvider(DocumentClassifier):
 
 def _parse_result(raw: str) -> ClassificationResult:
     try:
-        data = json.loads(raw)
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            inner = [l for l in lines if not l.startswith("```")]
+            cleaned = "\n".join(inner).strip()
+        data = json.loads(cleaned)
         return ClassificationResult(
             doc_type=data.get("doc_type"),
             mes_referencia=data.get("mes_referencia"),
