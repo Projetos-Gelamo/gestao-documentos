@@ -20,6 +20,17 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
     if lower.endswith((".png", ".jpg", ".jpeg", ".tiff", ".bmp")):
         return _extract_ocr(file_bytes, is_pdf=False)[:MAX_CHARS]
 
+    if lower.endswith((".txt", ".xml", ".csv", ".json", ".html", ".htm")):
+        return file_bytes.decode("utf-8", errors="replace")[:MAX_CHARS]
+
+    # Tenta decodificar como texto genérico (Google Docs exportados, etc.)
+    try:
+        decoded = file_bytes.decode("utf-8", errors="strict")
+        if decoded.strip():
+            return decoded[:MAX_CHARS]
+    except UnicodeDecodeError:
+        pass
+
     return ""
 
 
