@@ -12,6 +12,7 @@ const statusLabel: Record<string, string> = {
   em_revisao: "Em revisão",
   revisado: "Revisado",
   nao_reconhecido: "Não reconhecido",
+  duplicata: "Duplicata",
 };
 
 const statusColor: Record<string, string> = {
@@ -21,6 +22,7 @@ const statusColor: Record<string, string> = {
   em_revisao: "#8b5cf6",
   revisado: "#2563eb",
   nao_reconhecido: "#6b7280",
+  duplicata: "#ea580c",
 };
 
 export default async function EmpresaDetalhe({ params }: { params: Promise<{ id: string }> }) {

@@ -31,6 +31,7 @@ type UploadResult = {
   status: string;
   na_fila_revisao: boolean;
   nome_sugerido: string | null;
+  duplicata_de: string | null;
 };
 
 export default function UploadForm({ empresaId, empresaNome }: { empresaId: string; empresaNome: string }) {
@@ -164,13 +165,22 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 }
 
 function ResultCard({ result }: { result: UploadResult }) {
-  const bg = result.na_fila_revisao ? "#fef3c7" : "#f0fdf4";
-  const border = result.na_fila_revisao ? "#fde68a" : "#bbf7d0";
+  const isDup = result.status === "duplicata";
+  const isRevision = result.na_fila_revisao;
+  const bg = isDup ? "#fff7ed" : isRevision ? "#fef3c7" : "#f0fdf4";
+  const border = isDup ? "#fed7aa" : isRevision ? "#fde68a" : "#bbf7d0";
+  const icon = isDup ? "⚠ DUPLICATA detectada" : isRevision ? "⚠ Não identificado — aguarda revisão" : "✓ Documento classificado";
   return (
     <div style={{ marginTop: 20, background: bg, border: `1px solid ${border}`, borderRadius: 10, padding: 20 }}>
-      <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
-        {result.na_fila_revisao ? "⚠ Não identificado — aguarda revisão" : "✓ Documento classificado"}
+      <p style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, color: isDup ? "#c2410c" : undefined }}>
+        {icon}
       </p>
+      {isDup && (
+        <div style={{ background: "#ffedd5", border: "1px solid #fed7aa", borderRadius: 6, padding: "8px 12px", fontSize: 13, color: "#9a3412", marginBottom: 12 }}>
+          Já existe um documento do mesmo tipo, banco e mês registrado para esta empresa.
+          O arquivo foi salvo, mas marcado como duplicata para sua revisão.
+        </div>
+      )}
       <Row label="Arquivo" value={result.nome_arquivo} />
       <Row label="Tipo identificado" value={result.tipo ? (TIPO_LABEL[result.tipo] ?? result.tipo) : "—"} />
       {result.banco && <Row label="Banco" value={result.banco} />}
@@ -178,6 +188,9 @@ function ResultCard({ result }: { result: UploadResult }) {
       <Row label="Período" value={result.mes_referencia ? _mesPtBR(result.mes_referencia) : "—"} />
       {result.nome_sugerido && <Row label="Nome sugerido" value={result.nome_sugerido} highlight />}
       <Row label="Confiança" value={`${(result.confidence * 100).toFixed(0)}%`} />
+      {isDup && result.duplicata_de && (
+        <Row label="Duplica documento" value={result.duplicata_de.substring(0, 8) + "..."} />
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ class DocumentoStatus(str, Enum):
     em_revisao = "em_revisao"
     revisado = "revisado"
     nao_reconhecido = "nao_reconhecido"
+    duplicata = "duplicata"
 
 
 class PerfilFuncionario(str, Enum):
@@ -220,6 +221,7 @@ class UploadResult(BaseModel):
     status: DocumentoStatus
     na_fila_revisao: bool
     nome_sugerido: str | None
+    duplicata_de: str | None = None   # id do documento já existente, se duplicata
 
 
 # ---------------------------------------------------------------------------

@@ -84,6 +84,35 @@ async def upload_documento(
     text = extract_text(content, filename)
     result, status = await classify_document(text, filename)
 
+    # Detecta duplicata: mesmo empresa + tipo + mes + banco (fuzzy) + conta
+    duplicata_de: str | None = None
+    if result.doc_type and result.doc_type != "nao_reconhecido" and result.mes_referencia:
+        try:
+            q = (
+                supabase.schema("gestao_docs")
+                .from_("documento")
+                .select("id,banco,conta")
+                .eq("empresa_id", empresa_id)
+                .eq("tipo", result.doc_type)
+                .eq("mes_referencia", result.mes_referencia)
+                .not_.eq("status", "duplicata")
+                .execute()
+            )
+            for existing in q.data:
+                banco_esp = (result.banco or "").lower().strip()
+                banco_doc = (existing.get("banco") or "").lower().strip()
+                conta_esp = (result.conta or "").lower().replace("-", "").replace(".", "").strip()
+                conta_doc = (existing.get("conta") or "").lower().replace("-", "").replace(".", "").strip()
+                banco_match = (not banco_esp) or (banco_esp in banco_doc) or (banco_doc in banco_esp)
+                conta_match = (not conta_esp) or (conta_esp in conta_doc) or (conta_doc in conta_esp)
+                if banco_match and conta_match:
+                    duplicata_de = existing["id"]
+                    status = DocumentoStatus.duplicata
+                    logger.info("Duplicata detectada: novo arquivo duplica documento %s", duplicata_de)
+                    break
+        except Exception as exc:
+            logger.warning("Erro ao checar duplicata: %s", exc)
+
     # Persiste documento no banco
     doc_data = {
         "empresa_id": empresa_id,
@@ -128,4 +157,5 @@ async def upload_documento(
         status=status,
         na_fila_revisao=na_fila,
         nome_sugerido=_nome_sugerido(result.doc_type, result.mes_referencia, result.banco, result.conta),
+        duplicata_de=duplicata_de,
     )
