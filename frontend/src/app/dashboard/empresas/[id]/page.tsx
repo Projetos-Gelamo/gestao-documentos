@@ -1,5 +1,6 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { notFound } from "next/navigation";
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
 const statusLabel: Record<string, string> = {
   pendente: "Pendente",
@@ -21,17 +22,16 @@ const statusColor: Record<string, string> = {
 
 export default async function EmpresaDetalhe({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = createSupabaseAdminClient();
 
   const [empresaRes, documentosRes] = await Promise.all([
-    supabase.schema("gestao_docs").from("empresa").select("nome, cnpj, codigo").eq("id", id).single(),
-    supabase.schema("gestao_docs").from("documento").select("*").eq("empresa_id", id).order("detectado_em", { ascending: false }),
+    fetch(`${API}/empresas/${id}`, { cache: "no-store" }),
+    fetch(`${API}/documentos/?empresa_id=${id}`, { cache: "no-store" }),
   ]);
 
-  if (!empresaRes.data) notFound();
+  if (!empresaRes.ok) notFound();
 
-  const empresa = empresaRes.data;
-  const documentos = documentosRes.data ?? [];
+  const empresa = await empresaRes.json();
+  const documentos: any[] = documentosRes.ok ? await documentosRes.json() : [];
 
   return (
     <div>

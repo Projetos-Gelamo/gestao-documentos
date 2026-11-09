@@ -1,28 +1,13 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
 export default async function RevisaoPage() {
-  const supabase = createSupabaseAdminClient();
-
-  const { data: itens } = await supabase
-    .schema("gestao_docs")
-    .from("fila_revisao")
-    .select(`
-      id,
-      criado_em,
-      documento:documento_id (
-        nome_arquivo,
-        tipo,
-        status,
-        empresa:empresa_id (nome)
-      )
-    `)
-    .is("resolvido_em", null)
-    .order("criado_em");
+  const res = await fetch(`${API}/revisao/`, { cache: "no-store" });
+  const itens: any[] = res.ok ? await res.json() : [];
 
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Fila de Revisão</h1>
-      {!itens?.length ? (
+      {!itens.length ? (
         <p style={{ color: "#16a34a" }}>✓ Nenhum documento aguardando revisão.</p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,.08)" }}>
@@ -35,17 +20,14 @@ export default async function RevisaoPage() {
             </tr>
           </thead>
           <tbody>
-            {itens.map((item) => {
-              const doc = item.documento as any;
-              return (
-                <tr key={item.id} style={{ borderTop: "1px solid #e5e7eb" }}>
-                  <td style={td}>{doc?.empresa?.nome ?? "—"}</td>
-                  <td style={td}>{doc?.nome_arquivo ?? "—"}</td>
-                  <td style={td}>{doc?.tipo ?? "não reconhecido"}</td>
-                  <td style={td}>{new Date(item.criado_em).toLocaleDateString("pt-BR")}</td>
-                </tr>
-              );
-            })}
+            {itens.map((item) => (
+              <tr key={item.id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                <td style={td}>{item.documento?.empresa?.nome ?? "—"}</td>
+                <td style={td}>{item.documento?.nome_arquivo ?? "—"}</td>
+                <td style={td}>{item.documento?.tipo ?? "não reconhecido"}</td>
+                <td style={td}>{new Date(item.criado_em).toLocaleDateString("pt-BR")}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}

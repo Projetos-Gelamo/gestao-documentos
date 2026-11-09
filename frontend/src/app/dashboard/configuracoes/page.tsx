@@ -1,15 +1,8 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
 export default async function ConfiguracoesPage() {
-  const supabase = createSupabaseAdminClient();
-
-  const { data: config } = await supabase
-    .schema("gestao_docs")
-    .from("configuracao_sistema")
-    .select("modo_ficticio")
-    .limit(1)
-    .single();
-
+  const res = await fetch(`${API}/relatorios/config`, { cache: "no-store" });
+  const config = res.ok ? await res.json() : { modo_ficticio: true };
   const modoFicticio = config?.modo_ficticio ?? true;
 
   return (

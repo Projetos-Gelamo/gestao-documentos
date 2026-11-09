@@ -1,25 +1,19 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
 export default async function DashboardPage() {
-  const supabase = createSupabaseAdminClient();
-
-  const [empresasRes, pendentesRes, revisaoRes] = await Promise.all([
-    supabase.schema("gestao_docs").from("empresa").select("id", { count: "exact", head: true }),
-    supabase.schema("gestao_docs").from("documento").select("id", { count: "exact", head: true }).eq("status", "pendente"),
-    supabase.schema("gestao_docs").from("fila_revisao").select("id", { count: "exact", head: true }).is("resolvido_em", null),
+  const [empresas, pendentes, revisao] = await Promise.all([
+    fetch(`${API}/empresas/`, { cache: "no-store" }).then((r) => r.ok ? r.json() : []),
+    fetch(`${API}/documentos/?status=pendente`, { cache: "no-store" }).then((r) => r.ok ? r.json() : []),
+    fetch(`${API}/revisao/`, { cache: "no-store" }).then((r) => r.ok ? r.json() : []),
   ]);
-
-  const totalEmpresas = empresasRes.count ?? 0;
-  const totalPendentes = pendentesRes.count ?? 0;
-  const totalRevisao = revisaoRes.count ?? 0;
 
   return (
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Painel</h1>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-        <Card title="Empresas monitoradas" value={totalEmpresas} />
-        <Card title="Documentos pendentes" value={totalPendentes} color="#f59e0b" />
-        <Card title="Aguardando revisão" value={totalRevisao} color="#ef4444" />
+        <Card title="Empresas monitoradas" value={empresas.length} />
+        <Card title="Documentos pendentes" value={pendentes.length} color="#f59e0b" />
+        <Card title="Aguardando revisão" value={revisao.length} color="#ef4444" />
       </div>
     </div>
   );

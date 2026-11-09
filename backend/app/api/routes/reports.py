@@ -10,6 +10,14 @@ from app.services.report import generate_daily_report
 router = APIRouter(prefix="/relatorios", tags=["relatorios"])
 
 
+@router.get("/config")
+async def get_config():
+    """Retorna configurações do sistema."""
+    supabase = get_supabase()
+    res = supabase.schema("gestao_docs").from_("configuracao_sistema").select("modo_ficticio").limit(1).maybe_single().execute()
+    return res.data or {"modo_ficticio": True}
+
+
 @router.get("/erros")
 async def list_erros(data: str | None = None):
     """Lista relatórios de erro. Filtra por data (YYYY-MM-DD) se fornecida."""
