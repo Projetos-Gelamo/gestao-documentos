@@ -30,7 +30,8 @@ class ClaudeProvider(DocumentClassifier):
             max_tokens=256,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = message.content[0].text.strip()
+        text_block = next((b for b in message.content if b.type == "text"), None)
+        raw = text_block.text.strip() if text_block else ""
         return _parse_result(raw)
 
 
