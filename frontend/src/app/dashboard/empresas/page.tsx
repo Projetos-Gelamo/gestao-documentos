@@ -11,7 +11,18 @@ export default async function EmpresasPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Empresas</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Empresas</h1>
+        <Link
+          href="/dashboard/empresas/nova"
+          style={{
+            background: '#2563eb', color: 'white', borderRadius: 6,
+            padding: '8px 16px', fontSize: 13, fontWeight: 600, textDecoration: 'none',
+          }}
+        >
+          + Nova empresa
+        </Link>
+      </div>
       {!empresas?.length ? (
         <p style={{ color: "#6b7280" }}>Nenhuma empresa cadastrada.</p>
       ) : (
