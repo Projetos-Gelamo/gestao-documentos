@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
@@ -103,6 +104,79 @@ def get_checklist(empresa_id: str, mes: str):
         pendentes=len(itens) - recebidos,
         itens=itens,
     )
+
+
+@router.get("/empresas/{empresa_id}/visao-anual")
+def get_visao_anual(empresa_id: str, ano: int | None = None):
+    """Matriz anual: tipos_esperados × 12 meses → recebido/pendente."""
+    if ano is None:
+        ano = datetime.now().year
+
+    supabase = get_supabase()
+
+    tipos_res = (
+        supabase.schema("gestao_docs")
+        .from_("tipo_documento_esperado")
+        .select("*")
+        .eq("empresa_id", empresa_id)
+        .execute()
+    )
+    tipos = tipos_res.data
+
+    docs_res = (
+        supabase.schema("gestao_docs")
+        .from_("documento")
+        .select("id,tipo,banco,conta,nome_arquivo,mes_referencia")
+        .eq("empresa_id", empresa_id)
+        .like("mes_referencia", f"{ano}-%")
+        .execute()
+    )
+    docs = docs_res.data
+
+    meses = [f"{ano}-{str(m).zfill(2)}" for m in range(1, 13)]
+
+    tipos_data = []
+    for tipo in tipos:
+        tipo_val = tipo.get("tipo", "")
+        banco_esp = (tipo.get("banco") or "").lower().strip()
+        conta_esp = (tipo.get("conta") or "").lower().strip()
+
+        meses_data = {}
+        for mes in meses:
+            docs_mes = [d for d in docs if d.get("mes_referencia") == mes]
+            matching = None
+            for doc in docs_mes:
+                if doc.get("tipo") != tipo_val:
+                    continue
+                if tipo_val == "extrato_bancario" and banco_esp:
+                    banco_doc = (doc.get("banco") or "").lower()
+                    if banco_esp not in banco_doc and banco_doc not in banco_esp:
+                        continue
+                if tipo_val == "extrato_bancario" and conta_esp:
+                    conta_doc = (doc.get("conta") or "").lower().replace("-", "").replace(".", "")
+                    conta_esp_norm = conta_esp.replace("-", "").replace(".", "")
+                    if conta_esp_norm not in conta_doc and conta_doc not in conta_esp_norm:
+                        continue
+                matching = doc
+                break
+
+            meses_data[mes] = {
+                "recebido": matching is not None,
+                "documento_id": matching["id"] if matching else None,
+                "documento_nome": matching["nome_arquivo"] if matching else None,
+            }
+
+        label = tipo.get("descricao") or _tipo_label(tipo_val, tipo.get("banco"), tipo.get("conta"))
+        tipos_data.append({
+            "tipo_id": tipo["id"],
+            "tipo": tipo_val,
+            "descricao": label,
+            "banco": tipo.get("banco"),
+            "conta": tipo.get("conta"),
+            "meses": meses_data,
+        })
+
+    return {"ano": ano, "empresa_id": empresa_id, "tipos": tipos_data}
 
 
 def _tipo_label(tipo: str, banco: str | None, conta: str | None) -> str:
