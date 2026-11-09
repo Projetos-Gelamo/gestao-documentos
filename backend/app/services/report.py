@@ -14,7 +14,7 @@ async def generate_daily_report() -> None:
 
     # Erros do dia: pasta errada + pendentes em revisão há mais de 24h
     erros_res = (
-        supabase.from_("relatorio_erro")
+        supabase.schema("gestao_docs").from_("relatorio_erro")
         .select("*, empresa:empresa_id(nome, codigo), documento:documento_id(nome_arquivo, tipo, status)")
         .gte("data", today)
         .is_("notificado_em", "null")
@@ -39,7 +39,7 @@ async def generate_daily_report() -> None:
 
     # Marca erros como notificados
     ids = [e["id"] for e in erros]
-    supabase.from_("relatorio_erro").update(
+    supabase.schema("gestao_docs").from_("relatorio_erro").update(
         {"notificado_em": datetime.now(timezone.utc).isoformat()}
     ).in_("id", ids).execute()
 
@@ -51,7 +51,7 @@ async def _get_destinatarios(supabase, empresa_ids: list[str]) -> list[str]:
 
     # Gestores recebem sempre
     gestores = (
-        supabase.from_("funcionario")
+        supabase.schema("gestao_docs").from_("funcionario")
         .select("email")
         .eq("perfil", "gestor")
         .execute()
@@ -62,7 +62,7 @@ async def _get_destinatarios(supabase, empresa_ids: list[str]) -> list[str]:
     # Funcionários com as empresas na carteira
     if empresa_ids:
         func_emp = (
-            supabase.from_("funcionario_empresa")
+            supabase.schema("gestao_docs").from_("funcionario_empresa")
             .select("funcionario:funcionario_id(email)")
             .in_("empresa_id", empresa_ids)
             .execute()

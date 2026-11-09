@@ -15,7 +15,7 @@ async def list_documentos(
     status: str | None = Query(None),
 ):
     supabase = get_supabase()
-    query = supabase.from_("documento").select("*")
+    query = supabase.schema("gestao_docs").from_("documento").select("*")
     if empresa_id:
         query = query.eq("empresa_id", str(empresa_id))
     if mes_referencia:
@@ -30,7 +30,7 @@ async def list_documentos(
 async def get_documento(documento_id: UUID):
     supabase = get_supabase()
     res = (
-        supabase.from_("documento")
+        supabase.schema("gestao_docs").from_("documento")
         .select("*")
         .eq("id", str(documento_id))
         .single()
@@ -48,7 +48,7 @@ async def update_documento(documento_id: UUID, update: DocumentoUpdate):
     if not payload:
         raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
     res = (
-        supabase.from_("documento")
+        supabase.schema("gestao_docs").from_("documento")
         .update(payload)
         .eq("id", str(documento_id))
         .execute()

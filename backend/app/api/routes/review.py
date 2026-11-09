@@ -20,7 +20,7 @@ class ResolvePayload(BaseModel):
 async def list_fila():
     supabase = get_supabase()
     res = (
-        supabase.from_("fila_revisao")
+        supabase.schema("gestao_docs").from_("fila_revisao")
         .select("*, documento:documento_id(nome_arquivo, tipo, status, empresa:empresa_id(nome))")
         .is_("resolvido_em", "null")
         .order("criado_em")
@@ -34,7 +34,7 @@ async def resolver_item(fila_id: UUID, payload: ResolvePayload):
     supabase = get_supabase()
 
     fila_res = (
-        supabase.from_("fila_revisao")
+        supabase.schema("gestao_docs").from_("fila_revisao")
         .select("documento_id")
         .eq("id", str(fila_id))
         .single()
@@ -46,7 +46,7 @@ async def resolver_item(fila_id: UUID, payload: ResolvePayload):
     documento_id = fila_res.data["documento_id"]
     now = datetime.now(timezone.utc).isoformat()
 
-    supabase.from_("documento").update(
+    supabase.schema("gestao_docs").from_("documento").update(
         {
             "tipo": payload.tipo,
             "mes_referencia": payload.mes_referencia,
@@ -55,7 +55,7 @@ async def resolver_item(fila_id: UUID, payload: ResolvePayload):
         }
     ).eq("id", documento_id).execute()
 
-    supabase.from_("fila_revisao").update(
+    supabase.schema("gestao_docs").from_("fila_revisao").update(
         {"resolvido_em": now}
     ).eq("id", str(fila_id)).execute()
 
