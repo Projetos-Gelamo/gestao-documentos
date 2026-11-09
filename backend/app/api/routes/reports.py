@@ -1,5 +1,8 @@
+import traceback
+
 from fastapi import APIRouter, BackgroundTasks
 
+from app.core.drive import list_new_files
 from app.core.supabase import get_supabase
 from app.services.monitor import run_monitor
 from app.services.report import generate_daily_report
@@ -34,3 +37,22 @@ async def disparar_monitor(background_tasks: BackgroundTasks):
     """Dispara o monitoramento do Drive manualmente."""
     background_tasks.add_task(run_monitor)
     return {"ok": True, "message": "Monitor do Drive iniciado em segundo plano"}
+
+
+@router.get("/monitor/debug-extracao")
+async def debug_extracao(file_id: str, mime_type: str = ""):
+    """Baixa um arquivo do Drive e retorna os primeiros 500 chars extraídos."""
+    from app.core.drive import download_file_bytes
+    from app.services.extractor import extract_text
+    try:
+        file_bytes = download_file_bytes(file_id, mime_type)
+        text = extract_text(file_bytes, f"test.{mime_type.split('/')[-1] if '/' in mime_type else 'txt'}")
+        return {
+            "file_id": file_id,
+            "mime_type": mime_type,
+            "bytes_len": len(file_bytes),
+            "text_len": len(text),
+            "text_preview": text[:500] if text else "(vazio)",
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
