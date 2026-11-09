@@ -47,6 +47,8 @@ def _parse_result(raw: str) -> ClassificationResult:
             doc_type=data.get("doc_type"),
             mes_referencia=data.get("mes_referencia"),
             cnpj=data.get("cnpj"),
+            banco=data.get("banco"),
+            conta=data.get("conta"),
             confidence=float(data.get("confidence", 0.0)),
             raw_response=raw,
         )

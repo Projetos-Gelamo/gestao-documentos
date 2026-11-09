@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import companies, documents, reports, review
+from app.api.routes import upload, tipos_esperados
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
@@ -24,16 +25,20 @@ app.include_router(companies.router)
 app.include_router(documents.router)
 app.include_router(review.router)
 app.include_router(reports.router)
+app.include_router(upload.router)
+app.include_router(tipos_esperados.router)
 
 scheduler = AsyncIOScheduler()
 
 
 @app.on_event("startup")
 async def startup():
+    from app.core.supabase import ensure_storage_bucket
     from app.services.monitor import run_monitor
     from app.services.report import generate_daily_report
 
-    # Monitor do Drive a cada N minutos
+    ensure_storage_bucket()
+
     scheduler.add_job(
         run_monitor,
         "interval",
@@ -42,7 +47,6 @@ async def startup():
         replace_existing=True,
     )
 
-    # Relatório diário via cron
     cron_parts = settings.daily_report_cron.split()
     if len(cron_parts) == 5:
         minute, hour, day, month, day_of_week = cron_parts

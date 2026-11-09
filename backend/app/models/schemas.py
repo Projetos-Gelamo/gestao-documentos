@@ -67,6 +67,10 @@ class TipoDocumentoEsperadoBase(BaseModel):
     empresa_id: UUID
     tipo: str
     periodicidade: PeriodicidadeDocumento = PeriodicidadeDocumento.mensal
+    banco: str | None = None
+    conta: str | None = None
+    agencia: str | None = None
+    descricao: str | None = None
 
 
 class TipoDocumentoEsperadoCreate(TipoDocumentoEsperadoBase):
@@ -85,12 +89,15 @@ class TipoDocumentoEsperado(TipoDocumentoEsperadoBase):
 
 class DocumentoBase(BaseModel):
     empresa_id: UUID
-    arquivo_id_drive: str
+    arquivo_id_drive: str | None = None
+    storage_path: str | None = None
     nome_arquivo: str
     tipo: str | None = None
     mes_referencia: str | None = None  # formato YYYY-MM
     status: DocumentoStatus = DocumentoStatus.pendente
     cnpj_extraido: str | None = None
+    banco: str | None = None
+    conta: str | None = None
     confianca: float | None = None
     ficticio: bool = False
 
@@ -104,6 +111,8 @@ class DocumentoUpdate(BaseModel):
     mes_referencia: str | None = None
     status: DocumentoStatus | None = None
     cnpj_extraido: str | None = None
+    banco: str | None = None
+    conta: str | None = None
     confianca: float | None = None
     classificado_em: datetime | None = None
 
@@ -188,5 +197,50 @@ class ClassificationResult(BaseModel):
     doc_type: str | None = None
     mes_referencia: str | None = None  # formato YYYY-MM
     cnpj: str | None = None
+    banco: str | None = None
+    conta: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     raw_response: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Resultado de upload (retornado ao frontend)
+# ---------------------------------------------------------------------------
+
+class UploadResult(BaseModel):
+    id: str
+    nome_arquivo: str
+    storage_path: str
+    tipo: str | None
+    mes_referencia: str | None
+    banco: str | None
+    conta: str | None
+    cnpj: str | None
+    confidence: float
+    status: DocumentoStatus
+    na_fila_revisao: bool
+    nome_sugerido: str | None
+
+
+# ---------------------------------------------------------------------------
+# Item do checklist mensal
+# ---------------------------------------------------------------------------
+
+class ChecklistItem(BaseModel):
+    tipo_id: str
+    tipo: str
+    descricao: str
+    banco: str | None
+    conta: str | None
+    recebido: bool
+    documento_id: str | None = None
+    documento_nome: str | None = None
+
+
+class ChecklistMensal(BaseModel):
+    mes: str
+    empresa_id: str
+    total: int
+    recebidos: int
+    pendentes: int
+    itens: list[ChecklistItem]
