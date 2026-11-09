@@ -27,7 +27,7 @@ class ClaudeProvider(DocumentClassifier):
         prompt = _load_prompt(filename, text)
         message = await self._client.messages.create(
             model="claude-haiku-5-5",
-            max_tokens=1024,
+            max_tokens=8192,
             messages=[{"role": "user", "content": prompt}],
         )
         text_block = next((b for b in message.content if b.type == "text"), None)
