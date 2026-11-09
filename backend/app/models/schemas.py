@@ -20,6 +20,7 @@ class DocumentoStatus(str, Enum):
     nao_reconhecido = "nao_reconhecido"
     duplicata = "duplicata"
     empresa_errada = "empresa_errada"
+    excluido = "excluido"
 
 
 class PerfilFuncionario(str, Enum):
@@ -123,6 +124,8 @@ class Documento(DocumentoBase):
     id: UUID
     detectado_em: datetime
     classificado_em: datetime | None = None
+    excluido_em: datetime | None = None
+    excluido_por: str | None = None
 
     model_config = {"from_attributes": True}
 
