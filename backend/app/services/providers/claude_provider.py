@@ -23,7 +23,7 @@ class ClaudeProvider(DocumentClassifier):
         self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     async def classify(self, text: str, filename: str) -> ClassificationResult:
-        logger.info("Classificando '%s': text_len=%d preview=%r", filename, len(text), text[:80])
+        logger.warning("CLASSIFY_DEBUG '%s': text_len=%d preview=%r", filename, len(text), text[:80])
         prompt = _load_prompt(filename, text)
         message = await self._client.messages.create(
             model="claude-haiku-4-5",
