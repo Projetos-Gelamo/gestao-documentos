@@ -27,9 +27,20 @@ def _build_service():
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
+_GOOGLE_WORKSPACE_EXPORT: dict[str, str] = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
+
+
 def list_new_files(folder_id: str, since: datetime | None) -> list[DriveFileMeta]:
     service = _build_service()
-    query = f"'{folder_id}' in parents and trashed = false"
+    query = (
+        f"'{folder_id}' in parents"
+        " and trashed = false"
+        " and mimeType != 'application/vnd.google-apps.folder'"
+    )
     if since:
         ts = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         query += f" and modifiedTime > '{ts}'"
@@ -59,9 +70,13 @@ def list_new_files(folder_id: str, since: datetime | None) -> list[DriveFileMeta
     return files
 
 
-def download_file_bytes(file_id: str) -> bytes:
+def download_file_bytes(file_id: str, mime_type: str = "") -> bytes:
     service = _build_service()
-    request = service.files().get_media(fileId=file_id)
+    export_mime = _GOOGLE_WORKSPACE_EXPORT.get(mime_type)
+    if export_mime:
+        request = service.files().export_media(fileId=file_id, mimeType=export_mime)
+    else:
+        request = service.files().get_media(fileId=file_id)
     buf = io.BytesIO()
     downloader = MediaIoBaseDownload(buf, request)
     done = False

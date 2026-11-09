@@ -65,7 +65,7 @@ async def _process_file(supabase, file_meta, empresa_id: str, modo_ficticio: boo
     logger.info("Processando arquivo: %s (%s)", file_meta.name, file_meta.id)
 
     try:
-        file_bytes = download_file_bytes(file_meta.id)
+        file_bytes = download_file_bytes(file_meta.id, file_meta.mime_type)
         text = extract_text(file_bytes, file_meta.name)
         result, status = await classify_document(text, file_meta.name)
     except Exception as exc:
