@@ -106,6 +106,62 @@ def get_checklist(empresa_id: str, mes: str):
     )
 
 
+@router.post("/empresas/{empresa_id}/configuracao-automatica")
+def configuracao_automatica(empresa_id: str, dry_run: bool = True):
+    """
+    Analisa documentos classificados da empresa e sugere (ou cria) entradas em
+    tipo_documento_esperado para combinações (tipo, banco, conta) ainda não cadastradas.
+    dry_run=True (padrão) → apenas preview. dry_run=False → cria no banco.
+    """
+    supabase = get_supabase()
+
+    docs_res = (
+        supabase.schema("gestao_docs").from_("documento")
+        .select("tipo,banco,conta")
+        .eq("empresa_id", empresa_id)
+        .eq("status", "classificado")
+        .execute()
+    )
+    docs = docs_res.data or []
+
+    existentes_res = (
+        supabase.schema("gestao_docs").from_("tipo_documento_esperado")
+        .select("tipo,banco,conta")
+        .eq("empresa_id", empresa_id)
+        .execute()
+    )
+    existentes_set = {
+        (e.get("tipo") or "", (e.get("banco") or "").lower().strip(), (e.get("conta") or "").lower().strip())
+        for e in (existentes_res.data or [])
+    }
+
+    seen: set[tuple] = set()
+    novos: list[dict] = []
+    for doc in docs:
+        tipo = doc.get("tipo") or ""
+        if not tipo:
+            continue
+        banco = (doc.get("banco") or "").strip()
+        conta = (doc.get("conta") or "").strip()
+        key = (tipo, banco.lower(), conta.lower())
+        if key in seen or key in existentes_set:
+            continue
+        seen.add(key)
+        novos.append({
+            "empresa_id": empresa_id,
+            "tipo": tipo,
+            "banco": banco or None,
+            "conta": conta or None,
+            "periodicidade": "mensal",
+        })
+
+    if dry_run or not novos:
+        return {"dry_run": True, "preview": novos, "total": len(novos)}
+
+    res = supabase.schema("gestao_docs").from_("tipo_documento_esperado").insert(novos).execute()
+    return {"dry_run": False, "criados": len(res.data or []), "preview": res.data or []}
+
+
 @router.get("/empresas/{empresa_id}/visao-anual")
 def get_visao_anual(empresa_id: str, ano: int | None = None):
     """Matriz anual: tipos_esperados × 12 meses → recebido/pendente."""

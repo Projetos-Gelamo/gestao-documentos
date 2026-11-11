@@ -27,11 +27,21 @@ type Tipo = {
   descricao: string | null;
 };
 
+type AutoPreviewItem = {
+  tipo: string;
+  banco: string | null;
+  conta: string | null;
+  periodicidade: string;
+};
+
 export default function TiposEsperadosSection({ empresaId }: { empresaId: string }) {
   const [tipos, setTipos] = useState<Tipo[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ tipo: "extrato_bancario", banco: "", conta: "", agencia: "", descricao: "" });
+  const [autoPreview, setAutoPreview] = useState<AutoPreviewItem[] | null>(null);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoConfirming, setAutoConfirming] = useState(false);
 
   useEffect(() => {
     fetch(`${API}/empresas/${empresaId}/tipos-esperados`)
@@ -69,11 +79,95 @@ export default function TiposEsperadosSection({ empresaId }: { empresaId: string
     setTipos((prev) => prev.filter((t) => t.id !== id));
   }
 
+  async function handleAutoPreview() {
+    setAutoLoading(true);
+    setAutoPreview(null);
+    const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=true`, { method: "POST" });
+    const data = res.ok ? await res.json() : { preview: [] };
+    setAutoPreview(data.preview ?? []);
+    setAutoLoading(false);
+  }
+
+  async function handleAutoConfirm() {
+    setAutoConfirming(true);
+    const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=false`, { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      const criados: Tipo[] = (data.preview ?? []).map((item: any) => ({
+        id: item.id ?? String(Math.random()),
+        tipo: item.tipo,
+        banco: item.banco ?? null,
+        conta: item.conta ?? null,
+        agencia: null,
+        descricao: null,
+      }));
+      setTipos((prev) => [...prev, ...criados]);
+    }
+    setAutoPreview(null);
+    setAutoConfirming(false);
+  }
+
   const tipoLabel = (val: string) => TIPOS_DOC.find((t) => t.value === val)?.label ?? val;
 
   return (
     <div style={{ marginTop: 32 }}>
-      <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Documentos esperados mensalmente</h2>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Documentos esperados mensalmente</h2>
+        <button
+          onClick={handleAutoPreview}
+          disabled={autoLoading}
+          style={{ padding: "6px 14px", background: "#c4a030", color: "white", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: autoLoading ? 0.7 : 1 }}
+        >
+          {autoLoading ? "Analisando..." : "✨ Gerar automaticamente"}
+        </button>
+      </div>
+
+      {autoPreview !== null && (
+        <div style={{ marginBottom: 16, padding: 16, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8 }}>
+          <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "#92400e" }}>
+            {autoPreview.length === 0
+              ? "✓ Nenhum tipo novo encontrado. Todos já estão configurados ou não há documentos classificados."
+              : `${autoPreview.length} tipo(s) encontrado(s) nos documentos classificados:`}
+          </p>
+          {autoPreview.length > 0 && (
+            <>
+              <ul style={{ margin: "0 0 12px 0", padding: "0 0 0 16px", fontSize: 13 }}>
+                {autoPreview.map((item, i) => (
+                  <li key={i} style={{ marginBottom: 4 }}>
+                    <strong>{tipoLabel(item.tipo)}</strong>
+                    {item.banco && <span style={{ color: "#6b7280" }}> — {item.banco}</span>}
+                    {item.conta && <span style={{ color: "#6b7280" }}> CC {item.conta}</span>}
+                    <span style={{ color: "#9ca3af" }}> (mensal)</span>
+                  </li>
+                ))}
+              </ul>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={handleAutoConfirm}
+                  disabled={autoConfirming}
+                  style={{ padding: "6px 14px", background: "#16a34a", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                >
+                  {autoConfirming ? "Salvando..." : "Confirmar e salvar"}
+                </button>
+                <button
+                  onClick={() => setAutoPreview(null)}
+                  style={{ padding: "6px 14px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, cursor: "pointer" }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </>
+          )}
+          {autoPreview.length === 0 && (
+            <button
+              onClick={() => setAutoPreview(null)}
+              style={{ padding: "5px 12px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, cursor: "pointer" }}
+            >
+              OK
+            </button>
+          )}
+        </div>
+      )}
       {loading ? (
         <p style={{ fontSize: 13, color: "#9ca3af" }}>Carregando...</p>
       ) : tipos.length === 0 ? (
