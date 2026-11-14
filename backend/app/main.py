@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import companies, documents, reports, review
-from app.api.routes import upload, tipos_esperados
+from app.api.routes import upload, tipos_esperados, plano_contas, lancamentos
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
@@ -27,6 +27,8 @@ app.include_router(review.router)
 app.include_router(reports.router)
 app.include_router(upload.router)
 app.include_router(tipos_esperados.router)
+app.include_router(plano_contas.router)
+app.include_router(lancamentos.router)
 
 scheduler = AsyncIOScheduler()
 

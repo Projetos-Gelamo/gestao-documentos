@@ -98,6 +98,18 @@ export default function EmpresaDetalheClient({
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <Link
+            href={`/dashboard/empresas/${empresa.id}/plano-contas`}
+            style={{ padding: "9px 14px", background: "transparent", color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 13, textDecoration: "none" }}
+          >
+            Plano de Contas
+          </Link>
+          <Link
+            href={`/dashboard/empresas/${empresa.id}/lancamentos`}
+            style={{ padding: "9px 14px", background: "transparent", color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 13, textDecoration: "none" }}
+          >
+            Lançamentos
+          </Link>
+          <Link
             href={`/dashboard/empresas/${empresa.id}/anual`}
             style={{ padding: "9px 16px", background: "#0c1a2e", color: "#c4a030", border: "1px solid #c4a030", borderRadius: 8, fontSize: 14, fontWeight: 600, textDecoration: "none" }}
           >

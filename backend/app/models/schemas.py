@@ -238,6 +238,91 @@ class UploadResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Plano de contas
+# ---------------------------------------------------------------------------
+
+class PlanoContasBase(BaseModel):
+    empresa_id: UUID
+    codigo: str
+    nome: str
+    tipo: str
+    codigo_pai: str | None = None
+    nivel: int = 1
+    aceita_lancamento: bool = True
+
+
+class PlanoContasCreate(PlanoContasBase):
+    pass
+
+
+class PlanoContas(PlanoContasBase):
+    id: UUID
+    criado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Regra de lançamento
+# ---------------------------------------------------------------------------
+
+class RegraLancamentoBase(BaseModel):
+    empresa_id: UUID
+    padrao: str
+    conta_debito: str
+    conta_credito: str
+    historico: str | None = None
+    cod_historico: str | None = None
+
+
+class RegraLancamentoCreate(RegraLancamentoBase):
+    pass
+
+
+class RegraLancamento(RegraLancamentoBase):
+    id: UUID
+    confianca: float
+    usos: int
+    criado_em: datetime
+    atualizado_em: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Lançamento contábil
+# ---------------------------------------------------------------------------
+
+class LancamentoContabilBase(BaseModel):
+    empresa_id: UUID
+    documento_id: UUID | None = None
+    data_lancamento: str  # YYYY-MM-DD
+    conta_debito: str
+    conta_credito: str
+    valor: float
+    historico: str | None = None
+    complemento_historico: str | None = None
+    cod_historico: str | None = None
+    lote: str | None = None
+    origem: str = "ia"
+
+
+class LancamentoContabilCreate(LancamentoContabilBase):
+    pass
+
+
+class LancamentoContabil(LancamentoContabilBase):
+    id: UUID
+    status: str
+    regra_id: UUID | None = None
+    criado_em: datetime
+    confirmado_em: datetime | None = None
+    exportado_em: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
 # Item do checklist mensal
 # ---------------------------------------------------------------------------
 
