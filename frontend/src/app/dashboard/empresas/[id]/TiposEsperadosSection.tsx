@@ -123,10 +123,14 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
           descricao: null,
         }));
         setTodos((prev) => [...prev, ...criados]);
+        setAutoPreview(null);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Erro ao salvar configuração: ${err.detail ?? `HTTP ${res.status}`}. Tente novamente.`);
       }
-      setAutoPreview(null);
     } catch (err) {
       console.error("Erro ao confirmar configuração automática:", err);
+      alert("Erro de conexão ao salvar. Tente novamente.");
     } finally {
       setAutoConfirming(false);
     }
