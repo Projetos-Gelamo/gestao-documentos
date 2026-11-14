@@ -58,14 +58,19 @@ export default function EmpresasListClient({ empresas }: { empresas: Empresa[] }
                 <td style={td}>{anonimizado ? "XX.XXX.XXX/XXXX-XX" : e.cnpj}</td>
                 <td style={td}>
                   {anonimizado ? `Empresa ${e.codigo}` : e.nome}
+                  {!isFilial && (filiaisByMatriz[e.id]?.length ?? 0) > 0 && (
+                    <>
+                      <span style={{ marginLeft: 8, fontSize: 11, color: "#1d4ed8", background: "#dbeafe", borderRadius: 4, padding: "1px 7px", fontWeight: 600 }}>
+                        MATRIZ
+                      </span>
+                      <span style={{ marginLeft: 4, fontSize: 11, color: "#6b7280", background: "#f3f4f6", borderRadius: 4, padding: "1px 6px" }}>
+                        {filiaisByMatriz[e.id].length} filial{filiaisByMatriz[e.id].length !== 1 ? "is" : ""}
+                      </span>
+                    </>
+                  )}
                   {isFilial && (
                     <span style={{ marginLeft: 8, fontSize: 11, color: "#6b7280", background: "#f3f4f6", borderRadius: 4, padding: "1px 6px" }}>
                       Filial
-                    </span>
-                  )}
-                  {!isFilial && (filiaisByMatriz[e.id]?.length ?? 0) > 0 && (
-                    <span style={{ marginLeft: 8, fontSize: 11, color: "#c4a030", background: "#fef3c7", borderRadius: 4, padding: "1px 6px" }}>
-                      {filiaisByMatriz[e.id].length} filial{filiaisByMatriz[e.id].length !== 1 ? "is" : ""}
                     </span>
                   )}
                 </td>
