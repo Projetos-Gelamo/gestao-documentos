@@ -158,8 +158,12 @@ def configuracao_automatica(empresa_id: str, dry_run: bool = True):
     if dry_run or not novos:
         return {"dry_run": True, "preview": novos, "total": len(novos)}
 
-    res = supabase.schema("gestao_docs").from_("tipo_documento_esperado").insert(novos).execute()
-    return {"dry_run": False, "criados": len(res.data or []), "preview": res.data or []}
+    try:
+        res = supabase.schema("gestao_docs").from_("tipo_documento_esperado").insert(novos).execute()
+        return {"dry_run": False, "criados": len(res.data or []), "preview": res.data or []}
+    except Exception as exc:
+        logger.error("Erro ao inserir tipos esperados: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar: {exc}")
 
 
 @router.get("/empresas/{empresa_id}/visao-anual")

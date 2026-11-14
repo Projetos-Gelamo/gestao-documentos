@@ -161,8 +161,13 @@ async def upload_documento(
                 banco_doc = (existing.get("banco") or "").lower().strip()
                 conta_esp = (result.conta or "").lower().replace("-", "").replace(".", "").strip()
                 conta_doc = (existing.get("conta") or "").lower().replace("-", "").replace(".", "").strip()
-                banco_match = (not banco_esp) or (banco_esp in banco_doc) or (banco_doc in banco_esp)
-                conta_match = (not conta_esp) or (conta_esp in conta_doc) or (conta_doc in conta_esp)
+                banco_match = (not banco_esp) or (banco_esp in banco_doc) or (banco_doc and banco_doc in banco_esp)
+                if not conta_esp and not conta_doc:
+                    conta_match = True
+                elif conta_esp and conta_doc:
+                    conta_match = (conta_esp in conta_doc) or (conta_doc in conta_esp)
+                else:
+                    conta_match = not conta_esp
                 if banco_match and conta_match:
                     duplicata_de = existing["id"]
                     status = DocumentoStatus.duplicata
