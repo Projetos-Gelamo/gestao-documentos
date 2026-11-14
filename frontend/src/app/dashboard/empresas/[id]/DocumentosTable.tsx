@@ -50,7 +50,7 @@ type Documento = {
   excluido_por?: string | null;
 };
 
-export default function DocumentosTable({ documentos: inicial }: { documentos: Documento[] }) {
+export default function DocumentosTable({ documentos: inicial, anonimizado = false }: { documentos: Documento[]; anonimizado?: boolean }) {
   const [docs, setDocs] = useState<Documento[]>(inicial);
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [excluindo, setExcluindo] = useState<string | null>(null);
@@ -177,7 +177,9 @@ export default function DocumentosTable({ documentos: inicial }: { documentos: D
                 <td style={td}>{d.tipo ?? "—"}</td>
                 <td style={td}>{d.mes_referencia ?? "—"}</td>
                 <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>
-                  {d.banco ? `${d.banco}${d.conta ? ` CC ${d.conta}` : ""}` : "—"}
+                  {anonimizado
+                    ? (d.banco ? "Banco **** CC ****-*" : "—")
+                    : (d.banco ? `${d.banco}${d.conta ? ` CC ${d.conta}` : ""}` : "—")}
                 </td>
                 <td style={td}>
                   {isExcluido ? (
