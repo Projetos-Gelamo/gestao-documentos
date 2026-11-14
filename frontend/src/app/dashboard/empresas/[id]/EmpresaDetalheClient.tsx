@@ -143,7 +143,7 @@ export default function EmpresaDetalheClient({
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <Link
-            href={`/dashboard/empresas/${empresa.id}/anual`}
+            href={`/dashboard/empresas/${entidadeId}/anual`}
             style={{ padding: "9px 16px", background: "#0c1a2e", color: "#c4a030", border: "1px solid #c4a030", borderRadius: 8, fontSize: 14, fontWeight: 600, textDecoration: "none" }}
           >
             Visão anual
