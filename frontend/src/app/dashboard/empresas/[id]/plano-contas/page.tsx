@@ -2,7 +2,7 @@ import PlanoContasClient from "./PlanoContasClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
-export default async function PlanoContasPage({ params }: { params: { id: string } }) {
+export default async function PlanoContasPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   const [empRes, planoRes] = await Promise.all([
