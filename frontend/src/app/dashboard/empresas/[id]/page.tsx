@@ -6,15 +6,17 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-produc
 export default async function EmpresaDetalhe({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const [empresaRes, documentosRes] = await Promise.all([
+  const [empresaRes, documentosRes, filiaisRes] = await Promise.all([
     fetch(`${API}/empresas/${id}`, { cache: "no-store" }),
     fetch(`${API}/documentos/?empresa_id=${id}`, { cache: "no-store" }),
+    fetch(`${API}/empresas/${id}/filiais`, { cache: "no-store" }),
   ]);
 
   if (!empresaRes.ok) notFound();
 
   const empresa = await empresaRes.json();
   const documentos: any[] = documentosRes.ok ? await documentosRes.json() : [];
+  const filiais: any[] = filiaisRes.ok ? await filiaisRes.json() : [];
 
-  return <EmpresaDetalheClient empresa={empresa} documentos={documentos} />;
+  return <EmpresaDetalheClient empresa={empresa} documentos={documentos} filiais={filiais} />;
 }

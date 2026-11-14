@@ -50,6 +50,7 @@ class EmpresaBase(BaseModel):
     nome: str
     pasta_id_drive: str | None = None
     ficticio: bool = False
+    matriz_id: UUID | None = None
 
 
 class EmpresaCreate(EmpresaBase):
@@ -61,6 +62,7 @@ class EmpresaUpdate(BaseModel):
     nome: str | None = None
     cnpj: str | None = None
     pasta_id_drive: str | None = None
+    matriz_id: UUID | None = None
 
 
 class Empresa(EmpresaBase):

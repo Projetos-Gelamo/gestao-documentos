@@ -37,6 +37,19 @@ async def create_empresa(empresa: EmpresaCreate):
     return res.data[0]
 
 
+@router.get("/{empresa_id}/filiais", response_model=list[Empresa])
+async def get_filiais(empresa_id: UUID):
+    supabase = get_supabase()
+    res = (
+        supabase.schema("gestao_docs").from_("empresa")
+        .select("*")
+        .eq("matriz_id", str(empresa_id))
+        .order("nome")
+        .execute()
+    )
+    return res.data or []
+
+
 @router.patch("/{empresa_id}", response_model=Empresa)
 async def update_empresa(empresa_id: UUID, update: EmpresaUpdate):
     supabase = get_supabase()
