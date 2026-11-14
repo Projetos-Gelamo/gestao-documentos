@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 
 from app.core.supabase import get_supabase
-from app.models.schemas import Empresa, EmpresaCreate
+from app.models.schemas import Empresa, EmpresaCreate, EmpresaUpdate
 
 router = APIRouter(prefix="/empresas", tags=["empresas"])
 
@@ -34,4 +34,21 @@ async def get_empresa(empresa_id: UUID):
 async def create_empresa(empresa: EmpresaCreate):
     supabase = get_supabase()
     res = supabase.schema("gestao_docs").from_("empresa").insert(empresa.model_dump()).execute()
+    return res.data[0]
+
+
+@router.patch("/{empresa_id}", response_model=Empresa)
+async def update_empresa(empresa_id: UUID, update: EmpresaUpdate):
+    supabase = get_supabase()
+    payload = update.model_dump(exclude_none=True)
+    if not payload:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+    res = (
+        supabase.schema("gestao_docs").from_("empresa")
+        .update(payload)
+        .eq("id", str(empresa_id))
+        .execute()
+    )
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
     return res.data[0]

@@ -56,6 +56,13 @@ class EmpresaCreate(EmpresaBase):
     pass
 
 
+class EmpresaUpdate(BaseModel):
+    codigo: str | None = None
+    nome: str | None = None
+    cnpj: str | None = None
+    pasta_id_drive: str | None = None
+
+
 class Empresa(EmpresaBase):
     id: UUID
 

@@ -1,9 +1,11 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ChecklistSection from "./ChecklistSection";
 import DocumentosTable from "./DocumentosTable";
 import TiposEsperadosSection from "./TiposEsperadosSection";
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
 type Empresa = { id: string; nome: string; cnpj: string; codigo: string };
 
@@ -16,6 +18,32 @@ export default function EmpresaDetalheClient({
 }) {
   const storageKey = `anon_${empresa.id}`;
   const [anonimizado, setAnonimizado] = useState(false);
+  const [editandoCodigo, setEditandoCodigo] = useState(false);
+  const [editandoNome, setEditandoNome] = useState(false);
+  const [codigoEdit, setCodigoEdit] = useState(empresa.codigo);
+  const [nomeEdit, setNomeEdit] = useState(empresa.nome);
+  const [salvando, setSalvando] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editandoCodigo || editandoNome) inputRef.current?.focus();
+  }, [editandoCodigo, editandoNome]);
+
+  async function salvarCampo(campo: "codigo" | "nome", valor: string) {
+    if (!valor.trim()) return;
+    setSalvando(true);
+    try {
+      await fetch(`${API}/empresas/${empresa.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [campo]: valor.trim() }),
+      });
+    } finally {
+      setSalvando(false);
+      setEditandoCodigo(false);
+      setEditandoNome(false);
+    }
+  }
 
   useEffect(() => {
     try {
@@ -31,7 +59,7 @@ export default function EmpresaDetalheClient({
     } catch {}
   }
 
-  const nomeExibido = anonimizado ? `Empresa ${empresa.codigo}` : empresa.nome;
+  const nomeExibido = anonimizado ? `Empresa ${codigoEdit}` : nomeEdit;
   const cnpjExibido = anonimizado ? "XX.XXX.XXX/XXXX-XX" : empresa.cnpj;
 
   return (
@@ -40,7 +68,25 @@ export default function EmpresaDetalheClient({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{nomeExibido}</h1>
+            {editandoNome && !anonimizado ? (
+              <input
+                ref={inputRef}
+                value={nomeEdit}
+                onChange={(e) => setNomeEdit(e.target.value)}
+                onBlur={() => salvarCampo("nome", nomeEdit)}
+                onKeyDown={(e) => { if (e.key === "Enter") salvarCampo("nome", nomeEdit); if (e.key === "Escape") { setNomeEdit(empresa.nome); setEditandoNome(false); } }}
+                style={{ fontSize: 22, fontWeight: 700, border: "none", borderBottom: "2px solid #c4a030", outline: "none", background: "transparent", width: 380 }}
+              />
+            ) : (
+              <h1
+                style={{ fontSize: 22, fontWeight: 700, margin: 0, cursor: anonimizado ? "default" : "text" }}
+                title={anonimizado ? "" : "Clique para editar"}
+                onClick={() => { if (!anonimizado) setEditandoNome(true); }}
+              >
+                {nomeExibido}
+                {!anonimizado && <span style={{ fontSize: 13, color: "#d1d5db", marginLeft: 6 }}>✎</span>}
+              </h1>
+            )}
             <button
               onClick={toggleAnon}
               title={anonimizado ? "Exibir dados reais" : "Anonimizar dados"}
@@ -58,8 +104,26 @@ export default function EmpresaDetalheClient({
               {anonimizado ? "🔒 Anonimizado" : "👁 Anonimizar"}
             </button>
           </div>
-          <p style={{ color: "#6b7280", fontSize: 13, margin: 0 }}>
-            CNPJ: {cnpjExibido} · Código: {empresa.codigo}
+          <p style={{ color: "#6b7280", fontSize: 13, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+            CNPJ: {cnpjExibido} · Código:{" "}
+            {editandoCodigo && !anonimizado ? (
+              <input
+                ref={inputRef}
+                value={codigoEdit}
+                onChange={(e) => setCodigoEdit(e.target.value.toUpperCase())}
+                onBlur={() => salvarCampo("codigo", codigoEdit)}
+                onKeyDown={(e) => { if (e.key === "Enter") salvarCampo("codigo", codigoEdit); if (e.key === "Escape") { setCodigoEdit(empresa.codigo); setEditandoCodigo(false); } }}
+                style={{ fontSize: 13, border: "none", borderBottom: "1px solid #c4a030", outline: "none", background: "transparent", width: 120, fontWeight: 600 }}
+              />
+            ) : (
+              <span
+                style={{ fontWeight: 600, cursor: anonimizado ? "default" : "pointer", borderBottom: anonimizado ? "none" : "1px dashed #d1d5db" }}
+                title={anonimizado ? "" : "Clique para editar"}
+                onClick={() => { if (!anonimizado) setEditandoCodigo(true); }}
+              >
+                {salvando ? "..." : codigoEdit}
+              </span>
+            )}
           </p>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
