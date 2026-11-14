@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useAnon } from "../../AnonContext";
 import ChecklistSection from "./ChecklistSection";
 import DocumentosTable from "./DocumentosTable";
 import TiposEsperadosSection from "./TiposEsperadosSection";
@@ -16,8 +17,7 @@ export default function EmpresaDetalheClient({
   empresa: Empresa;
   documentos: any[];
 }) {
-  const storageKey = `anon_${empresa.id}`;
-  const [anonimizado, setAnonimizado] = useState(false);
+  const { anonimizado } = useAnon();
   const [editandoCodigo, setEditandoCodigo] = useState(false);
   const [editandoNome, setEditandoNome] = useState(false);
   const [codigoEdit, setCodigoEdit] = useState(empresa.codigo);
@@ -43,20 +43,6 @@ export default function EmpresaDetalheClient({
       setEditandoCodigo(false);
       setEditandoNome(false);
     }
-  }
-
-  useEffect(() => {
-    try {
-      setAnonimizado(localStorage.getItem(storageKey) === "1");
-    } catch {}
-  }, [storageKey]);
-
-  function toggleAnon() {
-    const next = !anonimizado;
-    setAnonimizado(next);
-    try {
-      next ? localStorage.setItem(storageKey, "1") : localStorage.removeItem(storageKey);
-    } catch {}
   }
 
   const nomeExibido = anonimizado ? `Empresa ${codigoEdit}` : nomeEdit;
@@ -87,22 +73,6 @@ export default function EmpresaDetalheClient({
                 {!anonimizado && <span style={{ fontSize: 13, color: "#d1d5db", marginLeft: 6 }}>✎</span>}
               </h1>
             )}
-            <button
-              onClick={toggleAnon}
-              title={anonimizado ? "Exibir dados reais" : "Anonimizar dados"}
-              style={{
-                background: anonimizado ? "#fef3c7" : "transparent",
-                border: anonimizado ? "1px solid #fde68a" : "1px solid #e5e7eb",
-                borderRadius: 6,
-                padding: "3px 8px",
-                cursor: "pointer",
-                fontSize: 13,
-                color: anonimizado ? "#92400e" : "#9ca3af",
-                fontWeight: anonimizado ? 600 : 400,
-              }}
-            >
-              {anonimizado ? "🔒 Anonimizado" : "👁 Anonimizar"}
-            </button>
           </div>
           <p style={{ color: "#6b7280", fontSize: 13, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
             CNPJ: {cnpjExibido} · Código:{" "}

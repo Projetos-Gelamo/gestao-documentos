@@ -1,5 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { AnonProvider } from "./AnonContext";
+import AnonToggle from "./AnonToggle";
 import NavLinks from "./NavLinks";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -9,6 +11,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect("/login");
 
   return (
+    <AnonProvider>
     <div style={{ display: "flex", minHeight: "100vh", background: "#f0ede8" }}>
       {/* Sidebar */}
       <nav style={{
@@ -78,14 +81,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
               Gestão de Documentos Contábeis
             </p>
           </div>
-          <span style={{ fontSize: 13, fontWeight: 800, color: "#c4a030", letterSpacing: "0.12em" }}>
-            GÉLAMO CONTÁBIL
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <AnonToggle />
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#c4a030", letterSpacing: "0.12em" }}>
+              GÉLAMO CONTÁBIL
+            </span>
+          </div>
         </header>
 
         {/* Page content */}
         <main style={{ flex: 1, padding: 32, overflowX: "auto" }}>{children}</main>
       </div>
     </div>
+    </AnonProvider>
   );
 }
