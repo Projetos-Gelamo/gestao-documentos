@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 import uuid
 from datetime import datetime
 
@@ -32,6 +34,18 @@ _DEPARTAMENTO_MAP: dict[str, str] = {
     "recibo":                "dp",
     "contrato":              "legal",
 }
+
+
+def _sanitize_filename(name: str) -> str:
+    """Remove acentos, substitui espaços por _ e remove caracteres inválidos para o Storage."""
+    # Normaliza unicode → remove marcas de acento
+    normalized = unicodedata.normalize("NFD", name)
+    ascii_name = normalized.encode("ascii", "ignore").decode("ascii")
+    # Substitui espaços e caracteres problemáticos por _
+    safe = re.sub(r"[^\w.\-]", "_", ascii_name)
+    # Colapsa múltiplos _ consecutivos
+    safe = re.sub(r"_+", "_", safe).strip("_")
+    return safe or "arquivo"
 
 
 def _nome_sugerido(tipo: str | None, mes: str | None, banco: str | None, conta: str | None) -> str | None:
@@ -77,10 +91,11 @@ async def upload_documento(
     filename = file.filename or "arquivo"
     content_type = file.content_type or "application/octet-stream"
 
-    # Caminho no Storage: empresa_id/YYYY-MM/uuid_filename
+    # Caminho no Storage: empresa_id/YYYY-MM/uuid_safe_filename
     mes_upload = datetime.now().strftime("%Y-%m")
     file_id = str(uuid.uuid4())[:8]
-    storage_path = f"{empresa_id}/{mes_upload}/{file_id}_{filename}"
+    safe_filename = _sanitize_filename(filename)
+    storage_path = f"{empresa_id}/{mes_upload}/{file_id}_{safe_filename}"
 
     # Busca CNPJ da empresa destino para validação posterior
     supabase = get_supabase()
