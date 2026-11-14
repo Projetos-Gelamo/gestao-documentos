@@ -25,10 +25,22 @@ const statusColor: Record<string, string> = {
   empresa_errada: "#b91c1c",
 };
 
+type Departamento = "todos" | "contabil" | "fiscal" | "dp" | "legal" | "outros";
+
+const ABAS: { key: Departamento; label: string }[] = [
+  { key: "todos",   label: "Todos" },
+  { key: "contabil", label: "Contábil" },
+  { key: "fiscal",  label: "Fiscal" },
+  { key: "dp",      label: "DP" },
+  { key: "legal",   label: "Legal" },
+  { key: "outros",  label: "Outros" },
+];
+
 type Documento = {
   id: string;
   nome_arquivo: string;
   tipo: string | null;
+  departamento: string | null;
   mes_referencia: string | null;
   banco: string | null;
   conta: string | null;
@@ -43,8 +55,17 @@ export default function DocumentosTable({ documentos: inicial }: { documentos: D
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [excluindo, setExcluindo] = useState<string | null>(null);
   const [historico, setHistorico] = useState(false);
+  const [aba, setAba] = useState<Departamento>("todos");
 
-  const visiveis = historico ? docs : docs.filter((d) => d.status !== "excluido");
+  const semExcluidos = historico ? docs : docs.filter((d) => d.status !== "excluido");
+  const visiveis = aba === "todos"
+    ? semExcluidos
+    : semExcluidos.filter((d) => (d.departamento ?? "outros") === aba);
+
+  function contarAba(key: Departamento) {
+    const base = docs.filter((d) => d.status !== "excluido");
+    return key === "todos" ? base.length : base.filter((d) => (d.departamento ?? "outros") === key).length;
+  }
 
   async function excluir(id: string) {
     setExcluindo(id);
@@ -76,6 +97,38 @@ export default function DocumentosTable({ documentos: inicial }: { documentos: D
 
   return (
     <div>
+      {/* Abas por departamento */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "2px solid #e5e7eb", paddingBottom: 0 }}>
+        {ABAS.map(({ key, label }) => {
+          const count = contarAba(key);
+          if (key !== "todos" && count === 0) return null;
+          const ativa = aba === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setAba(key)}
+              style={{
+                padding: "7px 14px",
+                fontSize: 13,
+                fontWeight: ativa ? 700 : 400,
+                color: ativa ? "#c4a030" : "#6b7280",
+                background: "transparent",
+                border: "none",
+                borderBottom: ativa ? "2px solid #c4a030" : "2px solid transparent",
+                marginBottom: -2,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {label}
+              <span style={{ marginLeft: 5, fontSize: 11, background: ativa ? "#fef3c7" : "#f3f4f6", color: ativa ? "#92400e" : "#6b7280", borderRadius: 10, padding: "1px 6px" }}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Controles */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <span style={{ fontSize: 13, color: "#6b7280" }}>

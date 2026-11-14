@@ -19,6 +19,20 @@ _MESES = {
     "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro",
 }
 
+_DEPARTAMENTO_MAP: dict[str, str] = {
+    "extrato_bancario":      "contabil",
+    "balancete":             "contabil",
+    "dre":                   "contabil",
+    "planilha_financeira":   "contabil",
+    "guia_pagamento":        "contabil",
+    "comprovante_pagamento": "contabil",
+    "contrato_emprestimo":   "contabil",
+    "nota_fiscal":           "fiscal",
+    "folha_pagamento":       "dp",
+    "recibo":                "dp",
+    "contrato":              "legal",
+}
+
 
 def _nome_sugerido(tipo: str | None, mes: str | None, banco: str | None, conta: str | None) -> str | None:
     tipo_label = {
@@ -148,6 +162,7 @@ async def upload_documento(
         "storage_path": storage_path,
         "nome_arquivo": filename,
         "tipo": result.doc_type,
+        "departamento": _DEPARTAMENTO_MAP.get(result.doc_type or "", "outros"),
         "mes_referencia": result.mes_referencia,
         "status": status.value,
         "cnpj_extraido": result.cnpj,

@@ -96,6 +96,7 @@ class DocumentoBase(BaseModel):
     storage_path: str | None = None
     nome_arquivo: str
     tipo: str | None = None
+    departamento: str | None = None
     mes_referencia: str | None = None  # formato YYYY-MM
     status: DocumentoStatus = DocumentoStatus.pendente
     cnpj_extraido: str | None = None
