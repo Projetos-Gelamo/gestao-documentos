@@ -96,29 +96,40 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
   async function handleAutoPreview() {
     setAutoLoading(true);
     setAutoPreview(null);
-    const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=true`, { method: "POST" });
-    const data = res.ok ? await res.json() : { preview: [] };
-    setAutoPreview(data.preview ?? []);
-    setAutoLoading(false);
+    try {
+      const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=true`, { method: "POST" });
+      const data = res.ok ? await res.json() : { preview: [] };
+      setAutoPreview(data.preview ?? []);
+    } catch (err) {
+      console.error("Erro ao gerar preview:", err);
+      setAutoPreview([]);
+    } finally {
+      setAutoLoading(false);
+    }
   }
 
   async function handleAutoConfirm() {
     setAutoConfirming(true);
-    const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=false`, { method: "POST" });
-    if (res.ok) {
-      const data = await res.json();
-      const criados: Tipo[] = (data.preview ?? []).map((item: any) => ({
-        id: item.id ?? String(Math.random()),
-        tipo: item.tipo,
-        banco: item.banco ?? null,
-        conta: item.conta ?? null,
-        agencia: null,
-        descricao: null,
-      }));
-      setTodos((prev) => [...prev, ...criados]);
+    try {
+      const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=false`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        const criados: Tipo[] = (data.preview ?? []).map((item: any) => ({
+          id: item.id ?? String(Math.random()),
+          tipo: item.tipo,
+          banco: item.banco ?? null,
+          conta: item.conta ?? null,
+          agencia: null,
+          descricao: null,
+        }));
+        setTodos((prev) => [...prev, ...criados]);
+      }
+      setAutoPreview(null);
+    } catch (err) {
+      console.error("Erro ao confirmar configuração automática:", err);
+    } finally {
+      setAutoConfirming(false);
     }
-    setAutoPreview(null);
-    setAutoConfirming(false);
   }
 
   const tipoLabel = (val: string) => TIPOS_DOC.find((t) => t.value === val)?.label ?? val;
