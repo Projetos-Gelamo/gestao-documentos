@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
-const TIPOS_DOC = [
+const TODOS_TIPOS_DOC = [
   { value: "extrato_bancario", label: "Extrato Bancário" },
   { value: "nota_fiscal", label: "Nota Fiscal" },
   { value: "folha_pagamento", label: "Folha de Pagamento" },
@@ -17,6 +17,14 @@ const TIPOS_DOC = [
   { value: "recibo", label: "Recibo" },
   { value: "outros", label: "Outros" },
 ];
+
+const TIPOS_BY_DEPT: Record<string, string[]> = {
+  contabil: ["extrato_bancario", "balancete", "dre", "planilha_financeira", "guia_pagamento", "comprovante_pagamento", "contrato_emprestimo"],
+  fiscal:   ["nota_fiscal"],
+  dp:       ["folha_pagamento", "recibo"],
+  legal:    ["contrato"],
+  outros:   ["outros"],
+};
 
 type Tipo = {
   id: string;
@@ -34,11 +42,17 @@ type AutoPreviewItem = {
   periodicidade: string;
 };
 
-export default function TiposEsperadosSection({ empresaId }: { empresaId: string }) {
-  const [tipos, setTipos] = useState<Tipo[]>([]);
+export default function TiposEsperadosSection({ empresaId, departamento }: { empresaId: string; departamento?: string }) {
+  const allowedTipos = departamento ? (TIPOS_BY_DEPT[departamento] ?? []) : TODOS_TIPOS_DOC.map((t) => t.value);
+  const TIPOS_DOC = TODOS_TIPOS_DOC.filter((t) => allowedTipos.includes(t.value));
+  const [todos, setTodos] = useState<Tipo[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ tipo: "extrato_bancario", banco: "", conta: "", agencia: "", descricao: "" });
+  const [form, setForm] = useState({ tipo: allowedTipos[0] ?? "extrato_bancario", banco: "", conta: "", agencia: "", descricao: "" });
+
+  const tipos = departamento
+    ? todos.filter((t) => allowedTipos.includes(t.tipo))
+    : todos;
   const [autoPreview, setAutoPreview] = useState<AutoPreviewItem[] | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoConfirming, setAutoConfirming] = useState(false);
@@ -46,7 +60,7 @@ export default function TiposEsperadosSection({ empresaId }: { empresaId: string
   useEffect(() => {
     fetch(`${API}/empresas/${empresaId}/tipos-esperados`)
       .then((r) => r.json())
-      .then(setTipos)
+      .then(setTodos)
       .finally(() => setLoading(false));
   }, [empresaId]);
 
@@ -68,15 +82,15 @@ export default function TiposEsperadosSection({ empresaId }: { empresaId: string
     });
     if (res.ok) {
       const novo = await res.json();
-      setTipos((prev) => [...prev, novo]);
-      setForm({ tipo: "extrato_bancario", banco: "", conta: "", agencia: "", descricao: "" });
+      setTodos((prev) => [...prev, novo]);
+      setForm({ tipo: allowedTipos[0] ?? "extrato_bancario", banco: "", conta: "", agencia: "", descricao: "" });
     }
     setAdding(false);
   }
 
   async function handleDelete(id: string) {
     await fetch(`${API}/tipos-esperados/${id}`, { method: "DELETE" });
-    setTipos((prev) => prev.filter((t) => t.id !== id));
+    setTodos((prev) => prev.filter((t) => t.id !== id));
   }
 
   async function handleAutoPreview() {
@@ -101,7 +115,7 @@ export default function TiposEsperadosSection({ empresaId }: { empresaId: string
         agencia: null,
         descricao: null,
       }));
-      setTipos((prev) => [...prev, ...criados]);
+      setTodos((prev) => [...prev, ...criados]);
     }
     setAutoPreview(null);
     setAutoConfirming(false);
@@ -113,13 +127,15 @@ export default function TiposEsperadosSection({ empresaId }: { empresaId: string
     <div style={{ marginTop: 32 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Documentos esperados mensalmente</h2>
-        <button
-          onClick={handleAutoPreview}
-          disabled={autoLoading}
-          style={{ padding: "6px 14px", background: "#c4a030", color: "white", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: autoLoading ? 0.7 : 1 }}
-        >
-          {autoLoading ? "Analisando..." : "✨ Gerar automaticamente"}
-        </button>
+        {(!departamento || departamento === "contabil") && (
+          <button
+            onClick={handleAutoPreview}
+            disabled={autoLoading}
+            style={{ padding: "6px 14px", background: "#c4a030", color: "white", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", opacity: autoLoading ? 0.7 : 1 }}
+          >
+            {autoLoading ? "Analisando..." : "✨ Gerar automaticamente"}
+          </button>
+        )}
       </div>
 
       {autoPreview !== null && (

@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
@@ -28,6 +28,8 @@ export default function PlanoContasClient({
   const [novo, setNovo] = useState({ codigo: "", nome: "", tipo: "ativo", codigo_pai: "", nivel: 1, aceita_lancamento: true });
   const [mostrarForm, setMostrarForm] = useState(false);
   const [busca, setBusca] = useState("");
+  const [importando, setImportando] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const empresaId = empresa?.id ?? "";
 
@@ -48,6 +50,48 @@ export default function PlanoContasClient({
       }
     } finally {
       setSalvando(false);
+    }
+  }
+
+  async function importarCSV(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportando(true);
+    try {
+      const text = await file.text();
+      const linhas = text.split(/\r?\n/).filter((l) => l.trim());
+      const header = linhas[0].toLowerCase().split(/[;,]/);
+      const idx = (col: string) => header.indexOf(col);
+
+      const contas = linhas.slice(1).map((linha) => {
+        const cols = linha.split(/[;,]/);
+        return {
+          empresa_id: empresaId,
+          codigo: cols[idx("codigo")]?.trim() ?? "",
+          nome: cols[idx("nome")]?.trim() ?? "",
+          tipo: cols[idx("tipo")]?.trim() ?? "ativo",
+          nivel: parseInt(cols[idx("nivel")]?.trim() ?? "1", 10) || 1,
+          codigo_pai: cols[idx("codigo_pai")]?.trim() || null,
+          aceita_lancamento: cols[idx("aceita_lancamento")]?.trim().toLowerCase() !== "false",
+        };
+      }).filter((c) => c.codigo && c.nome);
+
+      if (!contas.length) { alert("Nenhuma conta válida encontrada no arquivo."); return; }
+
+      const res = await fetch(`${API}/empresas/${empresaId}/plano-contas/importar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(contas),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const refresh = await fetch(`${API}/empresas/${empresaId}/plano-contas`);
+        if (refresh.ok) setPlano(await refresh.json());
+        alert(`${data.importadas} conta(s) importada(s) com sucesso.`);
+      }
+    } finally {
+      setImportando(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
   }
 
@@ -88,6 +132,14 @@ export default function PlanoContasClient({
             onChange={(e) => setBusca(e.target.value)}
             style={{ padding: "8px 12px", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 13, width: 220 }}
           />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={importando}
+            style={{ padding: "8px 14px", background: "transparent", color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 13, cursor: "pointer" }}
+          >
+            {importando ? "Importando..." : "⬆ Importar CSV"}
+          </button>
+          <input ref={fileRef} type="file" accept=".csv,.txt" onChange={importarCSV} style={{ display: "none" }} />
           <button
             onClick={() => setMostrarForm((v) => !v)}
             style={{ padding: "8px 16px", background: "#c4a030", color: "#0c1a2e", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}
@@ -227,6 +279,15 @@ export default function PlanoContasClient({
 
       <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af" }}>
         {filtrado.length} conta{filtrado.length !== 1 ? "s" : ""} · total no plano: {plano.length}
+      </div>
+
+      <div style={{ marginTop: 20, padding: 14, background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, fontSize: 12, color: "#0369a1" }}>
+        <strong>Formato CSV para importação:</strong>{" "}
+        <code>codigo;nome;tipo;nivel;codigo_pai;aceita_lancamento</code>
+        <br />
+        Tipos aceitos: <code>ativo · passivo · patrimonio · receita · despesa · resultado</code>
+        <br />
+        Separador: <code>;</code> ou <code>,</code> · <code>aceita_lancamento</code>: <code>true</code> ou <code>false</code>
       </div>
     </div>
   );

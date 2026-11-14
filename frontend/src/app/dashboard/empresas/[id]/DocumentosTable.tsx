@@ -50,17 +50,26 @@ type Documento = {
   excluido_por?: string | null;
 };
 
-export default function DocumentosTable({ documentos: inicial, anonimizado = false }: { documentos: Documento[]; anonimizado?: boolean }) {
+export default function DocumentosTable({
+  documentos: inicial,
+  anonimizado = false,
+  departamento,
+}: {
+  documentos: Documento[];
+  anonimizado?: boolean;
+  departamento?: string;
+}) {
   const [docs, setDocs] = useState<Documento[]>(inicial);
   const [confirmando, setConfirmando] = useState<string | null>(null);
   const [excluindo, setExcluindo] = useState<string | null>(null);
   const [historico, setHistorico] = useState(false);
   const [aba, setAba] = useState<Departamento>("todos");
 
+  const abaEfetiva: Departamento = departamento ? (departamento as Departamento) : aba;
   const semExcluidos = historico ? docs : docs.filter((d) => d.status !== "excluido");
-  const visiveis = aba === "todos"
+  const visiveis = abaEfetiva === "todos"
     ? semExcluidos
-    : semExcluidos.filter((d) => (d.departamento ?? "outros") === aba);
+    : semExcluidos.filter((d) => (d.departamento ?? "outros") === abaEfetiva);
 
   function contarAba(key: Departamento) {
     const base = docs.filter((d) => d.status !== "excluido");
@@ -97,37 +106,39 @@ export default function DocumentosTable({ documentos: inicial, anonimizado = fal
 
   return (
     <div>
-      {/* Abas por departamento */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "2px solid #e5e7eb", paddingBottom: 0 }}>
-        {ABAS.map(({ key, label }) => {
-          const count = contarAba(key);
-          if (key !== "todos" && count === 0) return null;
-          const ativa = aba === key;
-          return (
-            <button
-              key={key}
-              onClick={() => setAba(key)}
-              style={{
-                padding: "7px 14px",
-                fontSize: 13,
-                fontWeight: ativa ? 700 : 400,
-                color: ativa ? "#c4a030" : "#6b7280",
-                background: "transparent",
-                border: "none",
-                borderBottom: ativa ? "2px solid #c4a030" : "2px solid transparent",
-                marginBottom: -2,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {label}
-              <span style={{ marginLeft: 5, fontSize: 11, background: ativa ? "#fef3c7" : "#f3f4f6", color: ativa ? "#92400e" : "#6b7280", borderRadius: 10, padding: "1px 6px" }}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Abas por departamento — exibidas apenas quando não vier departamento do pai */}
+      {!departamento && (
+        <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "2px solid #e5e7eb", paddingBottom: 0 }}>
+          {ABAS.map(({ key, label }) => {
+            const count = contarAba(key);
+            if (key !== "todos" && count === 0) return null;
+            const ativa = aba === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setAba(key)}
+                style={{
+                  padding: "7px 14px",
+                  fontSize: 13,
+                  fontWeight: ativa ? 700 : 400,
+                  color: ativa ? "#c4a030" : "#6b7280",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: ativa ? "2px solid #c4a030" : "2px solid transparent",
+                  marginBottom: -2,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {label}
+                <span style={{ marginLeft: 5, fontSize: 11, background: ativa ? "#fef3c7" : "#f3f4f6", color: ativa ? "#92400e" : "#6b7280", borderRadius: 10, padding: "1px 6px" }}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Controles */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
