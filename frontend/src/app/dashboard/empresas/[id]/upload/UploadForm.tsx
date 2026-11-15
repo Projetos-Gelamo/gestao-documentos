@@ -79,20 +79,41 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [acoesFinal, setAcoesFinal] = useState<Record<string, string | null>>({});
   const [scanErroGeral, setScanErroGeral] = useState<string | null>(null);
+  const [empresasCarregando, setEmpresasCarregando] = useState(true);
   const [empresasErro, setEmpresasErro] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${API}/empresas`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data: any[]) => {
-        setAllEmpresas(data.map((e) => ({ id: e.id, nome: e.nome, cnpj: e.cnpj ?? null })));
-      })
-      .catch((err) => {
-        setEmpresasErro(`Não foi possível carregar a lista de empresas: ${err.message}`);
-      });
+    let cancelled = false;
+    let tentativa = 0;
+    const MAX_TENTATIVAS = 4;
+    const DELAY_MS = [0, 3000, 6000, 10000];
+
+    function fetchEmpresas() {
+      fetch(`${API}/empresas`)
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then((data: any[]) => {
+          if (cancelled) return;
+          setAllEmpresas(data.map((e) => ({ id: e.id, nome: e.nome, cnpj: e.cnpj ?? null })));
+          setEmpresasCarregando(false);
+          setEmpresasErro(null);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          tentativa++;
+          if (tentativa < MAX_TENTATIVAS) {
+            setTimeout(fetchEmpresas, DELAY_MS[tentativa]);
+          } else {
+            setEmpresasCarregando(false);
+            setEmpresasErro("Não foi possível carregar a lista de empresas. Recarregue a página.");
+          }
+        });
+    }
+
+    fetchEmpresas();
+    return () => { cancelled = true; };
   }, []);
 
   function addFiles(files: FileList | File[]) {
@@ -238,6 +259,11 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       {/* Indicador de etapas */}
       <StepBar step={step} />
 
+      {empresasCarregando && !empresasErro && (
+        <div style={{ marginBottom: 12, padding: "8px 14px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, fontSize: 12, color: "#0369a1" }}>
+          ⏳ Conectando ao servidor… (pode levar alguns segundos)
+        </div>
+      )}
       {empresasErro && (
         <div style={{ marginBottom: 12, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, fontSize: 13, color: "#b91c1c" }}>
           ✗ {empresasErro}
@@ -306,9 +332,11 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
               </div>
               <button
                 onClick={handleScan}
-                style={{ padding: "10px 28px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+                disabled={empresasCarregando}
+                title={empresasCarregando ? "Aguardando conexão com o servidor…" : undefined}
+                style={{ padding: "10px 28px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: empresasCarregando ? "not-allowed" : "pointer", opacity: empresasCarregando ? 0.5 : 1 }}
               >
-                Analisar {selectedFiles.length} arquivo{selectedFiles.length !== 1 ? "s" : ""} →
+                {empresasCarregando ? "Aguardando servidor…" : `Analisar ${selectedFiles.length} arquivo${selectedFiles.length !== 1 ? "s" : ""} →`}
               </button>
             </div>
           )}
