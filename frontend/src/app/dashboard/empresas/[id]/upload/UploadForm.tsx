@@ -243,7 +243,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     setFinalResults([]);
     setAcoes({});
     setContasNovas({});
-    setAcoesFinal({});
     setScanErroGeral(null);
     setScanProgress(0);
     setStep("selecao");
