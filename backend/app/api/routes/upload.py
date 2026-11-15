@@ -258,14 +258,19 @@ async def upload_documento(
     )
 
 
-# ── Novo fluxo de upload em 2 etapas ──────────────────────────────────────────
+# ── Fluxo de upload em 3 etapas ──────────────────────────────────────────────
 
 class ConfirmarItem(BaseModel):
     documento_id: str
-    empresa_destino_id: str
+    acao: str  # "salvar_aqui" | "fila_espera" | "baixar"
 
 class ConfirmarRequest(BaseModel):
+    empresa_id: str          # empresa atual (para "salvar_aqui")
     mapeamentos: List[ConfirmarItem]
+
+
+def _norm_cnpj(c: str) -> str:
+    return "".join(ch for ch in c if ch.isdigit())
 
 
 @router.post("/scan")
@@ -273,12 +278,18 @@ async def scan_upload(
     empresa_id: str = Form(...),
     files: List[UploadFile] = File(...),
 ):
-    """Etapa 1: armazena arquivos e extrai info, sem checar duplicatas."""
+    """Etapa 1: armazena arquivos e extrai info. Sem checagem de duplicatas ainda."""
     supabase = get_supabase()
-    results = []
 
-    def _norm(c: str) -> str:
-        return "".join(ch for ch in c if ch.isdigit())
+    # Carrega todas as empresas uma vez para sugerir pelo CNPJ
+    empresas_cache: list[dict] = []
+    try:
+        r = supabase.schema("gestao_docs").from_("empresa").select("id,cnpj,nome").execute()
+        empresas_cache = r.data or []
+    except Exception:
+        pass
+
+    results = []
 
     for file in files:
         content = await file.read()
@@ -307,17 +318,15 @@ async def scan_upload(
         result, status = await classify_document(text, filename)
 
         # Sugere empresa pelo CNPJ extraído
-        empresa_sugerida_id = empresa_id
+        empresa_sugerida_id: str = empresa_id
+        empresa_sugerida_nome: str | None = None
         if result.cnpj:
-            cnpj_doc = _norm(result.cnpj)
-            try:
-                todas = supabase.schema("gestao_docs").from_("empresa").select("id,cnpj").execute()
-                for e in (todas.data or []):
-                    if _norm(e.get("cnpj") or "") == cnpj_doc:
-                        empresa_sugerida_id = e["id"]
-                        break
-            except Exception:
-                pass
+            cnpj_doc = _norm_cnpj(result.cnpj)
+            for e in empresas_cache:
+                if _norm_cnpj(e.get("cnpj") or "") == cnpj_doc:
+                    empresa_sugerida_id = e["id"]
+                    empresa_sugerida_nome = e.get("nome")
+                    break
 
         doc_status = "nao_reconhecido" if status == DocumentoStatus.nao_reconhecido else "aguardando_classificacao"
         doc_data = {
@@ -357,6 +366,7 @@ async def scan_upload(
             "confidence": result.confidence,
             "status": doc_status,
             "empresa_sugerida_id": empresa_sugerida_id,
+            "empresa_sugerida_nome": empresa_sugerida_nome,
         })
 
     return {"arquivos": results}
@@ -364,13 +374,13 @@ async def scan_upload(
 
 @router.post("/confirmar")
 async def confirmar_upload(body: ConfirmarRequest):
-    """Etapa 2: aplica mapeamento de empresa e executa detecção de duplicatas."""
+    """Etapa 2: processa cada documento conforme acao do usuario."""
     supabase = get_supabase()
     results = []
 
     for item in body.mapeamentos:
         doc_id = item.documento_id
-        empresa_destino_id = item.empresa_destino_id
+        acao = item.acao  # "salvar_aqui" | "fila_espera" | "baixar"
 
         try:
             doc_res = (
@@ -392,7 +402,67 @@ async def confirmar_upload(body: ConfirmarRequest):
         mes_ref = doc.get("mes_referencia")
         filename = doc.get("nome_arquivo", "")
 
-        # Não reconhecido: apenas move e coloca na fila
+        # ── Fila de espera ────────────────────────────────────────────────────
+        if acao == "fila_espera":
+            supabase.schema("gestao_docs").from_("documento").update(
+                {"status": "aguardando_roteamento"}
+            ).eq("id", doc_id).execute()
+            try:
+                supabase.schema("gestao_docs").from_("fila_revisao").insert(
+                    {"documento_id": doc_id}
+                ).execute()
+            except Exception:
+                pass
+            results.append({
+                "id": doc_id, "nome_arquivo": filename, "tipo": tipo,
+                "banco": banco, "conta": conta, "mes_referencia": mes_ref,
+                "status": "aguardando_roteamento", "duplicata_de": None,
+                "empresa_id": doc.get("empresa_id"),
+                "cnpj_extraido": doc.get("cnpj_extraido"),
+                "confidence": doc.get("confianca", 0),
+                "nome_sugerido": _nome_sugerido(tipo, mes_ref, banco, conta),
+                "download_url": None,
+            })
+            continue
+
+        # ── Baixar e descartar ────────────────────────────────────────────────
+        if acao == "baixar":
+            download_url: str | None = None
+            storage_path = doc.get("storage_path")
+            if storage_path:
+                try:
+                    r = supabase.storage.from_(STORAGE_BUCKET).create_signed_url(storage_path, 300)
+                    download_url = r.get("signedURL") or r.get("signed_url")
+                except Exception as exc:
+                    logger.warning("Baixar: erro ao gerar URL: %s", exc)
+                # Soft-delete
+                from datetime import timezone
+                agora = datetime.now(timezone.utc).isoformat()
+                supabase.schema("gestao_docs").from_("documento").update({
+                    "status": "excluido",
+                    "excluido_em": agora,
+                    "excluido_por": "usuario",
+                }).eq("id", doc_id).execute()
+                try:
+                    supabase.storage.from_(STORAGE_BUCKET).remove([storage_path])
+                except Exception:
+                    pass
+            results.append({
+                "id": doc_id, "nome_arquivo": filename, "tipo": tipo,
+                "banco": banco, "conta": conta, "mes_referencia": mes_ref,
+                "status": "baixado", "duplicata_de": None,
+                "empresa_id": doc.get("empresa_id"),
+                "cnpj_extraido": doc.get("cnpj_extraido"),
+                "confidence": doc.get("confianca", 0),
+                "nome_sugerido": None,
+                "download_url": download_url,
+            })
+            continue
+
+        # ── Salvar aqui (padrão) ──────────────────────────────────────────────
+        empresa_destino_id = body.empresa_id
+
+        # Nao reconhecido: vai para fila de revisão
         if doc.get("status") == "nao_reconhecido":
             supabase.schema("gestao_docs").from_("documento").update(
                 {"empresa_id": empresa_destino_id}
@@ -418,6 +488,7 @@ async def confirmar_upload(body: ConfirmarRequest):
                 "cnpj_extraido": doc.get("cnpj_extraido"),
                 "confidence": doc.get("confianca", 0),
                 "nome_sugerido": _nome_sugerido(tipo, mes_ref, banco, conta),
+                "download_url": None,
             })
             continue
 
@@ -433,7 +504,7 @@ async def confirmar_upload(body: ConfirmarRequest):
                     .eq("empresa_id", empresa_destino_id)
                     .eq("tipo", tipo)
                     .eq("mes_referencia", mes_ref)
-                    .not_.in_("status", ["duplicata", "aguardando_classificacao", "excluido"])
+                    .not_.in_("status", ["duplicata", "aguardando_classificacao", "aguardando_roteamento", "excluido"])
                     .neq("id", doc_id)
                     .is_("excluido_em", None)
                     .execute()
@@ -481,6 +552,7 @@ async def confirmar_upload(body: ConfirmarRequest):
             "cnpj_extraido": doc.get("cnpj_extraido"),
             "confidence": doc.get("confianca", 0),
             "nome_sugerido": _nome_sugerido(tipo, mes_ref, banco, conta),
+            "download_url": None,
         })
 
     return {"resultados": results}
