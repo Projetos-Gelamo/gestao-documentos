@@ -45,9 +45,29 @@ export default function ConfiguracoesClient({ empresa, inline }: { empresa: Empr
   const [contas, setContas] = useState<ContaBancaria[]>([]);
   const [docs, setDocs] = useState<DocumentoEsperado[]>([]);
   const [loading, setLoading] = useState(true);
+  const [controleInicio, setControleInicio] = useState<string>("");
+  const [salvandoInicio, setSalvandoInicio] = useState(false);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { carregarContas(); carregarDocs(); }, [empresa.id]);
+  useEffect(() => { carregarContas(); carregarDocs(); carregarControle(); }, [empresa.id]);
+
+  async function carregarControle() {
+    try {
+      const r = await fetch(`${API}/empresas/${empresa.id}`);
+      if (r.ok) { const d = await r.json(); setControleInicio(d.controle_inicio ?? ""); }
+    } catch { /* silencioso */ }
+  }
+
+  async function salvarControle() {
+    setSalvandoInicio(true);
+    try {
+      await fetch(`${API}/empresas/${empresa.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ controle_inicio: controleInicio || null }),
+      });
+    } finally { setSalvandoInicio(false); }
+  }
 
   async function carregarContas() {
     setLoading(true);
@@ -77,6 +97,32 @@ export default function ConfiguracoesClient({ empresa, inline }: { empresa: Empr
         )}
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e", margin: 0 }}>Configurações</h1>
         <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>Contas bancárias e documentos esperados mensalmente</p>
+      </div>
+
+      {/* Início do controle */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, padding: "10px 14px",
+        background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 2 }}>
+            CONTROLE A PARTIR DE
+          </label>
+          <span style={{ fontSize: 12, color: "#9ca3af" }}>
+            Meses anteriores não aparecem como pendência no Controle Documentos
+          </span>
+        </div>
+        <input
+          type="month"
+          value={controleInicio}
+          onChange={(e) => setControleInicio(e.target.value)}
+          style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, background: "white" }}
+        />
+        <button
+          onClick={salvarControle}
+          disabled={salvandoInicio}
+          style={{ padding: "6px 14px", background: "#0c1a2e", color: "white", border: "none",
+            borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          {salvandoInicio ? "Salvando…" : "Salvar"}
+        </button>
       </div>
 
       {/* Abas */}

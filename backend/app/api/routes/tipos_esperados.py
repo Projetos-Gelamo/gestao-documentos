@@ -195,6 +195,15 @@ def get_visao_anual(empresa_id: str, ano: int | None = None):
 
     supabase = get_supabase()
 
+    # Lê controle_inicio da empresa (meses anteriores ficam como inaplicável)
+    controle_inicio: str | None = None
+    try:
+        emp_res = (supabase.schema("gestao_docs").from_("empresa")
+                   .select("controle_inicio").eq("id", empresa_id).single().execute())
+        controle_inicio = (emp_res.data or {}).get("controle_inicio")
+    except Exception:
+        pass
+
     # Lê documentos esperados com conta_bancaria joined
     docs_esp_res = (
         supabase.schema("gestao_docs")
@@ -238,8 +247,12 @@ def get_visao_anual(empresa_id: str, ano: int | None = None):
         meses_data = {}
         for mes in meses:
             mes_num = int(mes.split("-")[1])
+            # Meses antes do início do controle não contam como pendência
+            if controle_inicio and mes < controle_inicio:
+                meses_data[mes] = {"recebido": False, "aplicavel": False, "documento_id": None, "documento_nome": None}
+                continue
             if not _aplica_mes(freq, mes_num):
-                meses_data[mes] = {"recebido": False, "documento_id": None, "documento_nome": None}
+                meses_data[mes] = {"recebido": False, "aplicavel": True, "documento_id": None, "documento_nome": None}
                 continue
 
             docs_mes = [d for d in docs if d.get("mes_referencia") == mes]
@@ -261,6 +274,7 @@ def get_visao_anual(empresa_id: str, ano: int | None = None):
 
             meses_data[mes] = {
                 "recebido": matching is not None,
+                "aplicavel": True,
                 "documento_id": matching["id"] if matching else None,
                 "documento_nome": matching["nome_arquivo"] if matching else None,
             }

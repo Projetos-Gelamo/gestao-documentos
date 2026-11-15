@@ -5,7 +5,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-produc
 
 const MESES_ABREV = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"];
 
-type MesData = { recebido: boolean; documento_id: string | null; documento_nome: string | null };
+type MesData = { recebido: boolean; aplicavel?: boolean; documento_id: string | null; documento_nome: string | null };
 type TipoAnual = {
   tipo_id: string;
   tipo: string;
@@ -38,7 +38,8 @@ export default function AnnualView({ empresaId, empresaNome, inline }: { empresa
   const totalCols = 12;
   const mesKey = (m: number) => `${ano}-${String(m).padStart(2, "0")}`;
 
-  const totalEsperados = (data?.tipos.length ?? 0) * 12;
+  const totalEsperados = data?.tipos.reduce((acc, t) =>
+    acc + Object.values(t.meses).filter((m) => m.aplicavel !== false).length, 0) ?? 0;
   const totalRecebidos = data?.tipos.reduce((acc, t) =>
     acc + Object.values(t.meses).filter((m) => m.recebido).length, 0) ?? 0;
   const pct = totalEsperados > 0 ? Math.round((totalRecebidos / totalEsperados) * 100) : 0;
@@ -137,16 +138,22 @@ export default function AnnualView({ empresaId, empresaNome, inline }: { empresa
                       const mes = tipo.meses[mk];
                       const isFuture = mk > atual;
                       const isCurrent = mk === atual;
+                      const inaplicavel = mes?.aplicavel === false;
                       return (
                         <td key={m} style={{ padding: "10px 8px", textAlign: "center" }} title={mes?.documento_nome || undefined}>
-                          <Cell recebido={mes?.recebido ?? false} future={isFuture} current={isCurrent} />
+                          <Cell recebido={mes?.recebido ?? false} future={isFuture} current={isCurrent} inaplicavel={inaplicavel} />
                         </td>
                       );
                     })}
                     <td style={{ padding: "10px 8px", textAlign: "center" }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: recebidosAno === 12 ? "#16a34a" : recebidosAno > 0 ? "#c4a030" : "#6b7280" }}>
-                        {recebidosAno}/12
-                      </span>
+                      {(() => {
+                        const aplicaveis = Object.values(tipo.meses).filter((m) => m.aplicavel !== false).length;
+                        return (
+                          <span style={{ fontSize: 12, fontWeight: 700, color: recebidosAno === aplicaveis ? "#16a34a" : recebidosAno > 0 ? "#c4a030" : "#6b7280" }}>
+                            {recebidosAno}/{aplicaveis}
+                          </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );
@@ -159,7 +166,10 @@ export default function AnnualView({ empresaId, empresaNome, inline }: { empresa
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
                   const mk = mesKey(m);
                   const count = data.tipos.filter((t) => t.meses[mk]?.recebido).length;
-                  const total = data.tipos.length;
+                  const total = data.tipos.filter((t) => t.meses[mk]?.aplicavel !== false).length;
+                  if (total === 0) return (
+                    <td key={m} style={{ padding: "10px 8px", textAlign: "center", fontSize: 12, color: "#d1d5db" }}>—</td>
+                  );
                   return (
                     <td key={m} style={{ padding: "10px 8px", textAlign: "center", fontSize: 12, fontWeight: 600, color: count === total ? "#16a34a" : count > 0 ? "#c4a030" : "#9ca3af" }}>
                       {count}/{total}
@@ -184,7 +194,8 @@ export default function AnnualView({ empresaId, empresaNome, inline }: { empresa
   );
 }
 
-function Cell({ recebido, future, current }: { recebido: boolean; future: boolean; current: boolean }) {
+function Cell({ recebido, future, current, inaplicavel }: { recebido: boolean; future: boolean; current: boolean; inaplicavel?: boolean }) {
+  if (inaplicavel) return <span style={cell("#f3f4f6", "#d1d5db")}>—</span>;
   if (recebido) return <span style={cell("#dcfce7", "#16a34a")}>✓</span>;
   if (future) return <span style={cell("#f3f4f6", "#d1d5db")}>—</span>;
   if (current) return <span style={cell("#fef3c7", "#d97706")}>⏳</span>;

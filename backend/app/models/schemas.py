@@ -51,6 +51,7 @@ class EmpresaBase(BaseModel):
     pasta_id_drive: str | None = None
     ficticio: bool = False
     matriz_id: UUID | None = None
+    controle_inicio: str | None = None  # YYYY-MM: meses anteriores não contam como pendência
 
 
 class EmpresaCreate(EmpresaBase):
@@ -63,6 +64,7 @@ class EmpresaUpdate(BaseModel):
     cnpj: str | None = None
     pasta_id_drive: str | None = None
     matriz_id: UUID | None = None
+    controle_inicio: str | None = None
 
 
 class Empresa(EmpresaBase):
