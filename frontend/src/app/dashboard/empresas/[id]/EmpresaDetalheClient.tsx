@@ -102,100 +102,87 @@ export default function EmpresaDetalheClient({
 
   return (
     <div>
-      {/* Cabeçalho — sem botões de navegação no topo */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-          {editandoNome && !anonimizado ? (
-            <input
-              ref={inputRef}
-              value={nomeEdit}
-              onChange={(e) => setNomeEdit(e.target.value)}
-              onBlur={() => salvarCampo("nome", nomeEdit)}
-              onKeyDown={(e) => { if (e.key === "Enter") salvarCampo("nome", nomeEdit); if (e.key === "Escape") { setNomeEdit(empresa.nome); setEditandoNome(false); } }}
-              style={{ fontSize: 22, fontWeight: 700, border: "none", borderBottom: "2px solid #c4a030", outline: "none", background: "transparent", width: 380 }}
-            />
-          ) : (
-            <h1
-              style={{ fontSize: 22, fontWeight: 700, margin: 0, cursor: anonimizado ? "default" : "text" }}
-              title={anonimizado ? "" : "Clique para editar"}
-              onClick={() => { if (!anonimizado) setEditandoNome(true); }}
-            >
-              {nomeExibido}
-              {!anonimizado && <span style={{ fontSize: 13, color: "#d1d5db", marginLeft: 6 }}>✎</span>}
-            </h1>
-          )}
-        </div>
-        <p style={{ color: "#6b7280", fontSize: 13, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
-          CNPJ: {cnpjExibido} · Código:{" "}
-          {editandoCodigo && !anonimizado ? (
-            <input
-              ref={inputRef}
-              value={codigoEdit}
-              onChange={(e) => setCodigoEdit(e.target.value.toUpperCase())}
-              onBlur={() => salvarCampo("codigo", codigoEdit)}
-              onKeyDown={(e) => { if (e.key === "Enter") salvarCampo("codigo", codigoEdit); if (e.key === "Escape") { setCodigoEdit(empresa.codigo); setEditandoCodigo(false); } }}
-              style={{ fontSize: 13, border: "none", borderBottom: "1px solid #c4a030", outline: "none", background: "transparent", width: 120, fontWeight: 600 }}
-            />
-          ) : (
-            <span
-              style={{ fontWeight: 600, cursor: anonimizado ? "default" : "pointer", borderBottom: anonimizado ? "none" : "1px dashed #d1d5db" }}
-              title={anonimizado ? "" : "Clique para editar"}
-              onClick={() => { if (!anonimizado) setEditandoCodigo(true); }}
-            >
-              {salvando ? "..." : codigoEdit}
-            </span>
-          )}
-        </p>
-      </div>
-
-      {/* Seletor Matriz / Filial */}
-      {temFiliais && (
-        <div style={{
-          marginBottom: 20,
-          padding: "10px 16px",
-          background: "#f8f9fb",
-          border: "1px solid #e5e7eb",
-          borderRadius: 8,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexWrap: "wrap",
-        }}>
-          <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600, marginRight: 4 }}>Visualizando:</span>
-          {[empresa, ...filiais].map((e) => {
-            const selecionado = entidadeId === e.id;
-            const isFilial = e.id !== empresa.id;
-            return (
-              <button
-                key={e.id}
-                onClick={() => trocarEntidade(e.id)}
-                style={{
-                  padding: "5px 14px",
-                  borderRadius: 20,
-                  border: `1px solid ${selecionado ? "#c4a030" : "#d1d5db"}`,
-                  background: selecionado ? "#fef9ec" : "white",
-                  color: selecionado ? "#92400e" : "#374151",
-                  fontWeight: selecionado ? 700 : 400,
-                  fontSize: 13,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
+      {/* Cabeçalho — nome à esquerda, seletor Matriz/Filial à direita */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            {editandoNome && !anonimizado ? (
+              <input
+                ref={inputRef}
+                value={nomeEdit}
+                onChange={(e) => setNomeEdit(e.target.value)}
+                onBlur={() => salvarCampo("nome", nomeEdit)}
+                onKeyDown={(e) => { if (e.key === "Enter") salvarCampo("nome", nomeEdit); if (e.key === "Escape") { setNomeEdit(empresa.nome); setEditandoNome(false); } }}
+                style={{ fontSize: 22, fontWeight: 700, border: "none", borderBottom: "2px solid #c4a030", outline: "none", background: "transparent", width: 380 }}
+              />
+            ) : (
+              <h1
+                style={{ fontSize: 22, fontWeight: 700, margin: 0, cursor: anonimizado ? "default" : "text" }}
+                title={anonimizado ? "" : "Clique para editar"}
+                onClick={() => { if (!anonimizado) setEditandoNome(true); }}
               >
-                {isFilial && <span style={{ fontSize: 10, color: "#6b7280" }}>↳</span>}
-                {anonimizado ? `Empresa ${e.codigo}` : (isFilial ? `Filial — ${e.codigo}` : "Matriz")}
-                {selecionado && <span style={{ fontSize: 10 }}>●</span>}
-              </button>
-            );
-          })}
-          {entidadeId !== empresa.id && (
-            <span style={{ fontSize: 12, color: "#6b7280", marginLeft: 4 }}>
-              · CNPJ: {anonimizado ? "XX.XXX.XXX/XXXX-XX" : entidadeAtual.cnpj}
-            </span>
-          )}
+                {nomeExibido}
+                {!anonimizado && <span style={{ fontSize: 13, color: "#d1d5db", marginLeft: 6 }}>✎</span>}
+              </h1>
+            )}
+          </div>
+          <p style={{ color: "#6b7280", fontSize: 13, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+            CNPJ: {cnpjExibido} · Código:{" "}
+            {editandoCodigo && !anonimizado ? (
+              <input
+                ref={inputRef}
+                value={codigoEdit}
+                onChange={(e) => setCodigoEdit(e.target.value.toUpperCase())}
+                onBlur={() => salvarCampo("codigo", codigoEdit)}
+                onKeyDown={(e) => { if (e.key === "Enter") salvarCampo("codigo", codigoEdit); if (e.key === "Escape") { setCodigoEdit(empresa.codigo); setEditandoCodigo(false); } }}
+                style={{ fontSize: 13, border: "none", borderBottom: "1px solid #c4a030", outline: "none", background: "transparent", width: 120, fontWeight: 600 }}
+              />
+            ) : (
+              <span
+                style={{ fontWeight: 600, cursor: anonimizado ? "default" : "pointer", borderBottom: anonimizado ? "none" : "1px dashed #d1d5db" }}
+                title={anonimizado ? "" : "Clique para editar"}
+                onClick={() => { if (!anonimizado) setEditandoCodigo(true); }}
+              >
+                {salvando ? "..." : codigoEdit}
+              </span>
+            )}
+          </p>
         </div>
-      )}
+
+        {/* Seletor Matriz / Filial — canto superior direito */}
+        {temFiliais && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>Visualizando:</span>
+            {[empresa, ...filiais].map((e) => {
+              const selecionado = entidadeId === e.id;
+              const isFilial = e.id !== empresa.id;
+              return (
+                <button
+                  key={e.id}
+                  onClick={() => trocarEntidade(e.id)}
+                  style={{
+                    padding: "5px 14px",
+                    borderRadius: 20,
+                    border: `1px solid ${selecionado ? "#c4a030" : "#d1d5db"}`,
+                    background: selecionado ? "#fef9ec" : "white",
+                    color: selecionado ? "#92400e" : "#374151",
+                    fontWeight: selecionado ? 700 : 400,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {isFilial && <span style={{ fontSize: 10, color: "#6b7280" }}>↳</span>}
+                  {anonimizado ? `Empresa ${e.codigo}` : (isFilial ? `Filial — ${e.codigo}` : "Matriz")}
+                  {selecionado && <span style={{ fontSize: 10 }}>●</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Abas por departamento */}
       <div style={{ marginTop: 20 }}>
@@ -251,11 +238,12 @@ export default function EmpresaDetalheClient({
           {aba === "contabil" && (
             <div style={{
               display: "flex",
-              gap: 0,
+              gap: 8,
+              padding: "16px 24px",
               borderBottom: "1px solid #e5e7eb",
-              padding: "0 24px",
+              marginBottom: 0,
               background: "#fafafa",
-              borderRadius: "0 0 0 0",
+              flexWrap: "wrap",
             }}>
               {SUB_ABAS_CONTABIL.map(({ key, label, icon }) => {
                 const ativa = subAba === key;
@@ -264,19 +252,19 @@ export default function EmpresaDetalheClient({
                     key={key}
                     onClick={() => setSubAba(key)}
                     style={{
-                      padding: "10px 18px",
+                      padding: "7px 16px",
                       fontSize: 13,
                       fontWeight: ativa ? 700 : 500,
-                      color: ativa ? "#1d4ed8" : "#6b7280",
-                      background: "transparent",
-                      border: "none",
-                      borderBottom: ativa ? "2px solid #1d4ed8" : "2px solid transparent",
-                      marginBottom: -1,
+                      color: ativa ? "#c4a030" : "#374151",
+                      background: ativa ? "#0c1a2e" : "white",
+                      border: `1px solid ${ativa ? "#c4a030" : "#d1d5db"}`,
+                      borderRadius: 6,
                       cursor: "pointer",
                       whiteSpace: "nowrap",
                       display: "flex",
                       alignItems: "center",
                       gap: 6,
+                      transition: "all .15s",
                     }}
                   >
                     <span style={{ fontSize: 12 }}>{icon}</span>
@@ -343,7 +331,7 @@ export default function EmpresaDetalheClient({
                     ✦ Automatização Contábil
                   </p>
                   <p style={{ color: "#8a9ab8", fontSize: 13, margin: 0, marginBottom: 28 }}>
-                    Plano de contas e geração de lançamentos por IA para importação no Domínio
+                    Plano de contas, razões, balancetes e geração de lançamentos por IA para importação no Domínio
                   </p>
                   <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                     <Link
@@ -357,13 +345,33 @@ export default function EmpresaDetalheClient({
                       Plano de Contas
                     </Link>
                     <Link
+                      href={`/dashboard/empresas/${entidadeId}/razoes`}
+                      style={{
+                        padding: "11px 24px", background: "rgba(196,160,48,0.12)", color: "#c4a030",
+                        border: "1px solid rgba(196,160,48,0.4)", borderRadius: 8,
+                        fontSize: 14, fontWeight: 600, textDecoration: "none",
+                      }}
+                    >
+                      Razões
+                    </Link>
+                    <Link
+                      href={`/dashboard/empresas/${entidadeId}/balancetes`}
+                      style={{
+                        padding: "11px 24px", background: "rgba(196,160,48,0.12)", color: "#c4a030",
+                        border: "1px solid rgba(196,160,48,0.4)", borderRadius: 8,
+                        fontSize: 14, fontWeight: 600, textDecoration: "none",
+                      }}
+                    >
+                      Balancetes
+                    </Link>
+                    <Link
                       href={`/dashboard/empresas/${entidadeId}/lancamentos`}
                       style={{
                         padding: "11px 24px", background: "#c4a030", color: "#0c1a2e",
                         borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none",
                       }}
                     >
-                      Lançamentos
+                      Gerar Lançamentos
                     </Link>
                   </div>
                 </div>
