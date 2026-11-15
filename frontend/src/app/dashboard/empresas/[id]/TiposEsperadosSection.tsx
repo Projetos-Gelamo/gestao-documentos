@@ -49,10 +49,12 @@ export default function TiposEsperadosSection({
   empresaId,
   departamento,
   filiais = [],
+  hideAutoGenerate = false,
 }: {
   empresaId: string;
   departamento?: string;
   filiais?: EntidadeInfo[];
+  hideAutoGenerate?: boolean;
 }) {
   const allowedTipos = departamento ? (TIPOS_BY_DEPT[departamento] ?? []) : TODOS_TIPOS_DOC.map((t) => t.value);
   const TIPOS_DOC = TODOS_TIPOS_DOC.filter((t) => allowedTipos.includes(t.value));
@@ -186,7 +188,7 @@ export default function TiposEsperadosSection({
     <div style={{ marginTop: 32 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>Documentos esperados mensalmente</h2>
-        {(!departamento || departamento === "contabil") && (
+        {(!departamento || departamento === "contabil") && !hideAutoGenerate && (
           <button
             onClick={handleAutoPreview}
             disabled={autoLoading}

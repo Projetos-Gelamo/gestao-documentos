@@ -314,6 +314,7 @@ export default function EmpresaDetalheClient({
                   empresaId={entidadeId}
                   departamento="contabil"
                   filiais={entidadeId === empresa.id ? filiais.map((f) => ({ id: f.id, codigo: f.codigo, nome: f.nome })) : []}
+                  hideAutoGenerate
                 />
                 <RevisaoPendenteSection empresaId={entidadeId} />
               </div>
