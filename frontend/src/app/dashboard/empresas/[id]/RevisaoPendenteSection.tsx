@@ -154,9 +154,10 @@ export default function RevisaoPendenteSection({ empresaId }: { empresaId: strin
   }
 
   const statusLabel: Record<string, { label: string; color: string; bg: string }> = {
-    nao_reconhecido: { label: "Não identificado", color: "#d97706", bg: "#fefce8" },
-    empresa_errada:  { label: "Empresa errada",  color: "#b91c1c", bg: "#fef2f2" },
-    duplicata:       { label: "Duplicata",        color: "#c2410c", bg: "#fff7ed" },
+    nao_reconhecido:       { label: "Não identificado", color: "#d97706", bg: "#fefce8" },
+    empresa_errada:        { label: "Empresa errada",   color: "#b91c1c", bg: "#fef2f2" },
+    duplicata:             { label: "Duplicata",         color: "#c2410c", bg: "#fff7ed" },
+    aguardando_roteamento: { label: "Fila de espera",   color: "#7c3aed", bg: "#faf5ff" },
   };
 
   return (
@@ -227,6 +228,29 @@ export default function RevisaoPendenteSection({ empresaId }: { empresaId: strin
                     <div style={{ display: "flex", gap: 8 }}>
                       <AcaoBtn onClick={() => handleExcluir(doc)} loading={a?.emAndamento === "excluir"} label="✕ Excluir duplicata" color="#b91c1c" />
                     </div>
+                  )}
+                  {doc.status === "aguardando_roteamento" && !a?.classificandoManual && (
+                    <div>
+                      <p style={{ fontSize: 11, color: "#7c3aed", marginBottom: 6 }}>
+                        Arquivo aguardando destino. Mova para a empresa certa, classifique aqui, ou exclua.
+                      </p>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {doc.cnpj_extraido && (
+                          <AcaoBtn onClick={() => handleMoverEmpresa(doc)} loading={a?.emAndamento === "mover"} label="→ Mover para empresa certa" color="#2563eb" />
+                        )}
+                        <AcaoBtn onClick={() => setAcao(doc.id, { classificandoManual: true })} loading={false} label="✏ Classificar aqui" color="#16a34a" />
+                        <AcaoBtn onClick={() => handleExcluir(doc)} loading={a?.emAndamento === "excluir"} label="✕ Excluir" color="#b91c1c" />
+                      </div>
+                    </div>
+                  )}
+                  {doc.status === "aguardando_roteamento" && a?.classificandoManual && (
+                    <ClassificacaoForm
+                      form={a.manualForm}
+                      onChange={(f) => setAcao(doc.id, { manualForm: f })}
+                      onSubmit={() => handleClassificarManual(doc)}
+                      onCancel={() => setAcao(doc.id, { classificandoManual: false })}
+                      loading={a.emAndamento === "classificar"}
+                    />
                   )}
                 </div>
               </div>

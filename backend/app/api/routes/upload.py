@@ -559,7 +559,12 @@ async def confirmar_upload(body: ConfirmarRequest):
         }).eq("id", doc_id).execute()
 
         # Registra tipo_esperado quando o usuário confirma uma conta nova
-        if final_status == "classificado" and item.is_nova_conta and tipo and banco and conta:
+        # Para extrato_bancario: exige banco+conta. Para outros tipos: só o tipo basta.
+        _cria_tipo = (
+            final_status == "classificado" and item.is_nova_conta and tipo
+            and (tipo != "extrato_bancario" or (banco and conta))
+        )
+        if _cria_tipo:
             try:
                 supabase.schema("gestao_docs").from_("tipo_documento_esperado").insert({
                     "empresa_id": empresa_destino_id,
