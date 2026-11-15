@@ -263,6 +263,7 @@ async def upload_documento(
 class ConfirmarItem(BaseModel):
     documento_id: str
     acao: str  # "salvar_aqui" | "fila_espera" | "baixar"
+    is_nova_conta: bool = False  # se True e acao=salvar_aqui, cria tipo_esperado
 
 class ConfirmarRequest(BaseModel):
     empresa_id: str          # empresa atual (para "salvar_aqui")
@@ -286,6 +287,21 @@ async def scan_upload(
     try:
         r = supabase.schema("gestao_docs").from_("empresa").select("id,cnpj,nome").execute()
         empresas_cache = r.data or []
+    except Exception:
+        pass
+
+    # Contas já confirmadas para esta empresa (banco+conta normalizados)
+    contas_conhecidas: set[str] = set()
+    try:
+        te_res = (
+            supabase.schema("gestao_docs").from_("tipo_documento_esperado")
+            .select("banco,conta").eq("empresa_id", empresa_id).execute()
+        )
+        for t in (te_res.data or []):
+            b = (t.get("banco") or "").lower().strip()
+            c = re.sub(r"[^\d]", "", t.get("conta") or "")
+            if b and c:
+                contas_conhecidas.add(f"{b}|{c}")
     except Exception:
         pass
 
@@ -328,6 +344,14 @@ async def scan_upload(
                     empresa_sugerida_nome = e.get("nome")
                     break
 
+        # Conta é nova para esta empresa?
+        conta_nova = True
+        if result.banco and result.conta:
+            b = result.banco.lower().strip()
+            c = re.sub(r"[^\d]", "", result.conta)
+            if b and c:
+                conta_nova = f"{b}|{c}" not in contas_conhecidas
+
         doc_status = "nao_reconhecido" if status == DocumentoStatus.nao_reconhecido else "aguardando_classificacao"
         doc_data = {
             "empresa_id": empresa_id,
@@ -367,6 +391,7 @@ async def scan_upload(
             "status": doc_status,
             "empresa_sugerida_id": empresa_sugerida_id,
             "empresa_sugerida_nome": empresa_sugerida_nome,
+            "conta_nova": conta_nova,
         })
 
     return {"arquivos": results}
@@ -532,6 +557,19 @@ async def confirmar_upload(body: ConfirmarRequest):
             "empresa_id": empresa_destino_id,
             "status": final_status,
         }).eq("id", doc_id).execute()
+
+        # Registra tipo_esperado quando o usuário confirma uma conta nova
+        if final_status == "classificado" and item.is_nova_conta and tipo and banco and conta:
+            try:
+                supabase.schema("gestao_docs").from_("tipo_documento_esperado").insert({
+                    "empresa_id": empresa_destino_id,
+                    "tipo": tipo,
+                    "banco": banco,
+                    "conta": conta,
+                    "periodicidade": "mensal",
+                }).execute()
+            except Exception:
+                pass  # já existe ou outro erro não crítico
 
         if final_status == "duplicata":
             try:

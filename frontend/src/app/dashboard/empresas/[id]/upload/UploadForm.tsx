@@ -22,6 +22,7 @@ const TIPOS_DOC = Object.entries(TIPO_LABEL).map(([value, label]) => ({ value, l
 
 type Step = "selecao" | "scan_loading" | "pre_classif" | "confirm_loading" | "resultados";
 type Acao = "salvar_aqui" | "fila_espera" | "baixar";
+type RazaoDecisao = "empresa_errada" | "conta_nova" | "incompleto" | "nao_reconhecido";
 
 type ScanArquivo = {
   id: string;
@@ -35,6 +36,7 @@ type ScanArquivo = {
   status: "aguardando_classificacao" | "nao_reconhecido" | "erro";
   empresa_sugerida_id: string | null;
   empresa_sugerida_nome: string | null;
+  conta_nova: boolean;
   erro?: string;
 };
 
@@ -45,8 +47,9 @@ type GrupoContas = {
   banco: string | null;
   conta: string | null;
   documentos: ScanArquivo[];
-  ehOutraEmpresa: boolean;
+  razao: RazaoDecisao;
   empresaSugeridaNome: string | null;
+  cnpjExtraido: string | null;
 };
 
 type ResultadoFinal = {
@@ -71,15 +74,15 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   const inputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<Step>("selecao");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [scanProgress, setScanProgress] = useState(0);
 
-  // Grupos classificados por conta
   const [gruposConfirmados, setGruposConfirmados] = useState<GrupoContas[]>([]);
   const [gruposDecisao, setGruposDecisao] = useState<GrupoContas[]>([]);
   const [naoReconhecidos, setNaoReconhecidos] = useState<ScanArquivo[]>([]);
   const [comErro, setComErro] = useState<ScanArquivo[]>([]);
 
-  // Ações escolhidas pelo usuário: chave = grupoKey ou docId
   const [acoes, setAcoes] = useState<Record<string, Acao>>({});
+  const [contasNovas, setContasNovas] = useState<Record<string, boolean>>({});
 
   const [finalResults, setFinalResults] = useState<ResultadoFinal[]>([]);
   const [previewState, setPreviewState] = useState<{ url: string; nome: string } | null>(null);
@@ -94,69 +97,102 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   async function handleScan() {
     if (!selectedFiles.length) return;
     setStep("scan_loading");
+    setScanProgress(0);
     setScanErroGeral(null);
 
-    const form = new FormData();
-    form.append("empresa_id", empresaId);
-    for (const f of selectedFiles) form.append("files", f);
+    const allArquivos: ScanArquivo[] = [];
 
-    try {
-      const res = await fetch(`${API}/upload/scan`, { method: "POST", body: form });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Erro ao processar arquivos");
+    // Processa um arquivo por vez para barra de progresso real
+    for (let i = 0; i < selectedFiles.length; i++) {
+      setScanProgress(i + 1);
+      const f = selectedFiles[i];
+      const form = new FormData();
+      form.append("empresa_id", empresaId);
+      form.append("files", f);
+
+      try {
+        const res = await fetch(`${API}/upload/scan`, { method: "POST", body: form });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          allArquivos.push({
+            id: "", nome_arquivo: f.name, tipo: null, banco: null, conta: null,
+            cnpj_extraido: null, mes_referencia: null, confidence: 0,
+            status: "erro", empresa_sugerida_id: null, empresa_sugerida_nome: null,
+            conta_nova: false, erro: err.detail || "Erro ao processar",
+          });
+        } else {
+          const data = await res.json();
+          allArquivos.push(...(data.arquivos || []));
+        }
+      } catch (e: any) {
+        allArquivos.push({
+          id: "", nome_arquivo: f.name, tipo: null, banco: null, conta: null,
+          cnpj_extraido: null, mes_referencia: null, confidence: 0,
+          status: "erro", empresa_sugerida_id: null, empresa_sugerida_nome: null,
+          conta_nova: false, erro: e.message || "Erro de conexão",
+        });
       }
-      const data = await res.json();
-      const arquivos: ScanArquivo[] = data.arquivos || [];
+    }
 
-      const erros: ScanArquivo[] = [];
-      const naoRec: ScanArquivo[] = [];
-      const confirmadosMap = new Map<string, GrupoContas>();
-      const decisaoMap = new Map<string, GrupoContas>();
+    // Agrupa resultados
+    const erros: ScanArquivo[] = [];
+    const naoRec: ScanArquivo[] = [];
+    const confirmadosMap = new Map<string, GrupoContas>();
+    const decisaoMap = new Map<string, GrupoContas>();
+    const contasNovasMap: Record<string, boolean> = {};
 
-      for (const arq of arquivos) {
-        if (arq.status === "erro" || arq.erro) { erros.push(arq); continue; }
+    for (const arq of allArquivos) {
+      if (arq.status === "erro" || arq.erro) { erros.push(arq); continue; }
+      if (arq.status === "nao_reconhecido") { naoRec.push(arq); continue; }
 
-        if (arq.status === "nao_reconhecido") { naoRec.push(arq); continue; }
+      const ehEmpresaErrada = !!arq.empresa_sugerida_id && arq.empresa_sugerida_id !== empresaId;
+      const ehIncompleto = arq.tipo === "extrato_bancario" && (!arq.banco || !arq.conta);
+      const precisaDecisao = ehEmpresaErrada || arq.conta_nova || ehIncompleto;
 
-        const contaNorm = (arq.conta || "").toLowerCase().replace(/[^\d]/g, "");
-        const bancoNorm = (arq.banco || "").toLowerCase().trim();
-        const key = bancoNorm && contaNorm
-          ? `${bancoNorm}|${contaNorm}`
-          : `cnpj_${(arq.cnpj_extraido || "").replace(/\D/g, "") || arq.id}`;
+      const contaNorm = (arq.conta || "").replace(/[^\d]/g, "");
+      const bancoNorm = (arq.banco || "").toLowerCase().trim();
+      const key = bancoNorm && contaNorm
+        ? `${bancoNorm}|${contaNorm}`
+        : `doc_${(arq.cnpj_extraido || "").replace(/\D/g, "") || arq.id || arq.nome_arquivo}`;
 
-        const ehOutra = !!arq.empresa_sugerida_id && arq.empresa_sugerida_id !== empresaId;
-        const targetMap = ehOutra ? decisaoMap : confirmadosMap;
+      const tLabel = TIPO_LABEL[arq.tipo ?? ""] ?? "Documento";
+      const label = arq.banco && arq.conta
+        ? `${tLabel} — ${arq.banco} CC ${arq.conta}`
+        : arq.banco ? `${tLabel} — ${arq.banco}` : tLabel;
 
-        if (!targetMap.has(key)) {
-          const tLabel = TIPO_LABEL[arq.tipo ?? ""] ?? "Documento";
-          const label = arq.banco && arq.conta
-            ? `${tLabel} — ${arq.banco} CC ${arq.conta}`
-            : tLabel;
-          targetMap.set(key, {
-            key, label,
-            tipo: arq.tipo, banco: arq.banco, conta: arq.conta,
-            documentos: [],
-            ehOutraEmpresa: ehOutra,
-            empresaSugeridaNome: arq.empresa_sugerida_nome ?? null,
+      if (!precisaDecisao) {
+        if (!confirmadosMap.has(key)) {
+          confirmadosMap.set(key, {
+            key, label, tipo: arq.tipo, banco: arq.banco, conta: arq.conta,
+            documentos: [], razao: "conta_nova",
+            empresaSugeridaNome: null, cnpjExtraido: null,
           });
         }
-        targetMap.get(key)!.documentos.push(arq);
+        confirmadosMap.get(key)!.documentos.push(arq);
+      } else {
+        const razao: RazaoDecisao = ehEmpresaErrada ? "empresa_errada" : ehIncompleto ? "incompleto" : "conta_nova";
+        if (!decisaoMap.has(key)) {
+          decisaoMap.set(key, {
+            key, label, tipo: arq.tipo, banco: arq.banco, conta: arq.conta,
+            documentos: [], razao,
+            empresaSugeridaNome: arq.empresa_sugerida_nome ?? null,
+            cnpjExtraido: arq.cnpj_extraido ?? null,
+          });
+          contasNovasMap[key] = arq.conta_nova;
+        }
+        decisaoMap.get(key)!.documentos.push(arq);
       }
-
-      setGruposConfirmados(Array.from(confirmadosMap.values()));
-      setGruposDecisao(Array.from(decisaoMap.values()));
-      setNaoReconhecidos(naoRec);
-      setComErro(erros);
-      setAcoes({});
-      setStep("pre_classif");
-    } catch (e: any) {
-      setScanErroGeral(e.message || "Erro desconhecido");
-      setStep("selecao");
     }
+
+    setGruposConfirmados(Array.from(confirmadosMap.values()));
+    setGruposDecisao(Array.from(decisaoMap.values()));
+    setNaoReconhecidos(naoRec);
+    setComErro(erros);
+    setAcoes({});
+    setContasNovas(contasNovasMap);
+    setStep("pre_classif");
   }
 
-  // Verifica se todos os itens que precisam de decisão têm uma ação definida
   const totalDecisao = gruposDecisao.length + naoReconhecidos.length;
   const totalComAcao = Object.keys(acoes).length;
   const podeContinuar = totalDecisao === 0 || totalComAcao >= totalDecisao;
@@ -164,25 +200,23 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   async function handleConfirmar() {
     setStep("confirm_loading");
 
-    const mapeamentos: { documento_id: string; acao: Acao }[] = [];
+    const mapeamentos: { documento_id: string; acao: Acao; is_nova_conta?: boolean }[] = [];
 
-    // Confirmados: salvar aqui automaticamente
     for (const grupo of gruposConfirmados) {
       for (const doc of grupo.documentos) {
-        mapeamentos.push({ documento_id: doc.id, acao: "salvar_aqui" });
+        mapeamentos.push({ documento_id: doc.id, acao: "salvar_aqui", is_nova_conta: doc.conta_nova });
       }
     }
-    // Grupos de decisão
     for (const grupo of gruposDecisao) {
       const acao = acoes[grupo.key] ?? "salvar_aqui";
+      const isNova = contasNovas[grupo.key] ?? false;
       for (const doc of grupo.documentos) {
-        mapeamentos.push({ documento_id: doc.id, acao });
+        mapeamentos.push({ documento_id: doc.id, acao, is_nova_conta: acao === "salvar_aqui" ? isNova : false });
       }
     }
-    // Não reconhecidos
     for (const doc of naoReconhecidos) {
       const acao = acoes[doc.id] ?? "salvar_aqui";
-      mapeamentos.push({ documento_id: doc.id, acao });
+      mapeamentos.push({ documento_id: doc.id, acao, is_nova_conta: false });
     }
 
     try {
@@ -208,8 +242,10 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     setComErro([]);
     setFinalResults([]);
     setAcoes({});
+    setContasNovas({});
     setAcoesFinal({});
     setScanErroGeral(null);
+    setScanProgress(0);
     setStep("selecao");
   }
 
@@ -226,7 +262,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
   return (
     <div style={{ maxWidth: 760 }}>
-      {/* Cabeçalho */}
       <div style={{ marginBottom: 20 }}>
         <Link href={`/dashboard/empresas/${empresaId}`} style={{ fontSize: 13, color: "#c4a030", textDecoration: "none" }}>
           ← {empresaNome}
@@ -246,20 +281,33 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
             onClick={() => step === "selecao" && inputRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); if (step === "selecao" && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
-            style={{ border: "2px dashed #c4a030", borderRadius: 10, padding: "28px 20px", textAlign: "center", cursor: step === "selecao" ? "pointer" : "default", background: "#faf8f4", opacity: step === "scan_loading" ? 0.5 : 1 }}
+            style={{ border: "2px dashed #c4a030", borderRadius: 10, padding: "28px 20px", textAlign: "center", cursor: step === "selecao" ? "pointer" : "default", background: "#faf8f4" }}
           >
             <input ref={inputRef} type="file" multiple style={{ display: "none" }}
               accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.bmp,.xml,.ofx,.ofc,.xlsx,.xls,.csv"
               onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
             />
-            <p style={{ fontSize: 32, marginBottom: 8 }}>{step === "scan_loading" ? "⚙️" : "📂"}</p>
+
             {step === "scan_loading" ? (
               <>
-                <p style={{ color: "#0c1a2e", fontWeight: 600, fontSize: 15 }}>Analisando {selectedFiles.length} arquivo{selectedFiles.length !== 1 ? "s" : ""}…</p>
-                <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>A IA está lendo e extraindo as informações.</p>
+                <p style={{ fontSize: 28, marginBottom: 10 }}>⚙️</p>
+                <p style={{ color: "#0c1a2e", fontWeight: 600, fontSize: 15, marginBottom: 8 }}>
+                  Analisando arquivo {scanProgress} de {selectedFiles.length}…
+                </p>
+                <div style={{ width: "100%", maxWidth: 400, margin: "0 auto 8px", background: "#e5e7eb", borderRadius: 20, height: 8, overflow: "hidden" }}>
+                  <div style={{
+                    height: "100%", borderRadius: 20, background: "#c4a030",
+                    width: `${Math.round((scanProgress / selectedFiles.length) * 100)}%`,
+                    transition: "width 0.4s ease",
+                  }} />
+                </div>
+                <p style={{ fontSize: 11, color: "#9ca3af" }}>
+                  {Math.round((scanProgress / selectedFiles.length) * 100)}% — a IA está lendo e extraindo as informações
+                </p>
               </>
             ) : (
               <>
+                <p style={{ fontSize: 32, marginBottom: 8 }}>📂</p>
                 <p style={{ color: "#0c1a2e", fontWeight: 600, fontSize: 15 }}>Arraste arquivos aqui ou clique para selecionar</p>
                 <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>Vários arquivos de uma vez — PDF, Excel, XML, OFX, imagens</p>
               </>
@@ -292,41 +340,40 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         </div>
       )}
 
-      {/* ── Etapa 2: Revisão rápida ── */}
+      {/* ── Etapa 2: Revisão ── */}
       {step === "pre_classif" && (
         <div>
           <p style={{ fontSize: 13, color: "#374151", marginBottom: 20 }}>
-            A IA analisou os arquivos. Revise os itens que precisam de decisão antes de salvar.
+            A IA analisou os arquivos. Revise os itens abaixo antes de salvar.
           </p>
 
-          {/* Itens que precisam de decisão */}
           {(gruposDecisao.length > 0 || naoReconhecidos.length > 0) && (
             <div style={{ marginBottom: 24 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#c2410c", marginBottom: 10 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#c2410c", marginBottom: 6 }}>
                 ⚠ Requer sua decisão ({totalDecisao})
               </h3>
+              <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+                Selecione uma ação para cada item. As ações serão executadas ao clicar em <strong>Confirmar e salvar</strong>.
+              </p>
 
-              {/* Grupos de outra empresa */}
               {gruposDecisao.map((grupo) => (
                 <DecisaoCard
                   key={grupo.key}
-                  titulo={grupo.label}
-                  subtitulo={grupo.empresaSugeridaNome ? `Parece ser de: ${grupo.empresaSugeridaNome}` : "Conta de outra empresa"}
-                  corSubtitulo="#c2410c"
-                  numArquivos={grupo.documentos.length}
+                  grupo={grupo}
                   acaoSelecionada={acoes[grupo.key] ?? null}
                   onAcao={(a) => setAcoes((prev) => ({ ...prev, [grupo.key]: a }))}
                 />
               ))}
 
-              {/* Não reconhecidos */}
               {naoReconhecidos.map((arq) => (
                 <DecisaoCard
                   key={arq.id}
-                  titulo={arq.nome_arquivo}
-                  subtitulo="A IA não conseguiu identificar este arquivo"
-                  corSubtitulo="#d97706"
-                  numArquivos={1}
+                  grupo={{
+                    key: arq.id, label: arq.nome_arquivo, tipo: arq.tipo,
+                    banco: arq.banco, conta: arq.conta, documentos: [arq],
+                    razao: "nao_reconhecido", empresaSugeridaNome: null,
+                    cnpjExtraido: arq.cnpj_extraido,
+                  }}
                   acaoSelecionada={acoes[arq.id] ?? null}
                   onAcao={(a) => setAcoes((prev) => ({ ...prev, [arq.id]: a }))}
                 />
@@ -334,11 +381,10 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
             </div>
           )}
 
-          {/* Confirmados automaticamente */}
           {gruposConfirmados.length > 0 && (
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontSize: 14, fontWeight: 700, color: "#16a34a", marginBottom: 10 }}>
-                ✓ Desta empresa — serão salvos automaticamente ({gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0)} arquivo{gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0) !== 1 ? "s" : ""})
+                ✓ Contas conhecidas desta empresa — salvos automaticamente ({gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0)} arq.)
               </h3>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {gruposConfirmados.map((grupo) => (
@@ -352,7 +398,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
             </div>
           )}
 
-          {/* Erros de leitura */}
           {comErro.length > 0 && (
             <div style={{ marginBottom: 20, padding: "12px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8 }}>
               <p style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 6 }}>✗ Falha ao processar:</p>
@@ -362,7 +407,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
           {gruposConfirmados.length === 0 && gruposDecisao.length === 0 && naoReconhecidos.length === 0 && (
             <div style={{ padding: 16, background: "#f0fdf4", borderRadius: 8, fontSize: 13, color: "#16a34a" }}>
-              Nenhum arquivo processado. Verifique os arquivos e tente novamente.
+              Nenhum arquivo processado com sucesso.
             </div>
           )}
 
@@ -385,7 +430,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         </div>
       )}
 
-      {/* ── Carregando confirmação ── */}
       {step === "confirm_loading" && (
         <div style={{ textAlign: "center", padding: 56 }}>
           <p style={{ fontSize: 36 }}>⚙️</p>
@@ -398,27 +442,20 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       {step === "resultados" && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div>
-              {finalResults.filter((r) => r.status === "classificado").length > 0 && (
-                <span style={{ fontSize: 13, color: "#16a34a", fontWeight: 600, marginRight: 12 }}>
-                  ✓ {finalResults.filter((r) => r.status === "classificado").length} classificado{finalResults.filter((r) => r.status === "classificado").length !== 1 ? "s" : ""}
-                </span>
-              )}
-              {finalResults.filter((r) => r.status === "duplicata").length > 0 && (
-                <span style={{ fontSize: 13, color: "#c2410c", fontWeight: 600, marginRight: 12 }}>
-                  ⚠ {finalResults.filter((r) => r.status === "duplicata").length} duplicata{finalResults.filter((r) => r.status === "duplicata").length !== 1 ? "s" : ""}
-                </span>
-              )}
-              {finalResults.filter((r) => r.status === "aguardando_roteamento").length > 0 && (
-                <span style={{ fontSize: 13, color: "#7c3aed", fontWeight: 600, marginRight: 12 }}>
-                  📋 {finalResults.filter((r) => r.status === "aguardando_roteamento").length} na fila
-                </span>
-              )}
-              {finalResults.filter((r) => r.status === "baixado").length > 0 && (
-                <span style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>
-                  ⬇ {finalResults.filter((r) => r.status === "baixado").length} baixado{finalResults.filter((r) => r.status === "baixado").length !== 1 ? "s" : ""}
-                </span>
-              )}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {[
+                { key: "classificado",          icon: "✓",  label: "classificado", color: "#16a34a" },
+                { key: "duplicata",             icon: "⚠",  label: "duplicata",    color: "#c2410c" },
+                { key: "aguardando_roteamento", icon: "📋", label: "na fila",       color: "#7c3aed" },
+                { key: "baixado",               icon: "⬇", label: "baixado",       color: "#6b7280" },
+              ].map(({ key, icon, label, color }) => {
+                const n = finalResults.filter((r) => r.status === key).length;
+                return n > 0 ? (
+                  <span key={key} style={{ fontSize: 13, color, fontWeight: 600 }}>
+                    {icon} {n} {label}{n !== 1 ? "s" : ""}
+                  </span>
+                ) : null;
+              })}
             </div>
             <button onClick={resetar}
               style={{ padding: "7px 16px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
@@ -449,28 +486,52 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   );
 }
 
-// ── Card de decisão (3 botões) ─────────────────────────────────────────────
+// ── Card de decisão ────────────────────────────────────────────────────────
 
-function DecisaoCard({ titulo, subtitulo, corSubtitulo, numArquivos, acaoSelecionada, onAcao }: {
-  titulo: string;
-  subtitulo: string;
-  corSubtitulo: string;
-  numArquivos: number;
+function DecisaoCard({ grupo, acaoSelecionada, onAcao }: {
+  grupo: GrupoContas;
   acaoSelecionada: Acao | null;
   onAcao: (a: Acao) => void;
 }) {
+  const razaoInfo: Record<RazaoDecisao, { texto: string; cor: string }> = {
+    empresa_errada: {
+      texto: grupo.empresaSugeridaNome ? `Parece ser de: ${grupo.empresaSugeridaNome}` : "Conta de outra empresa",
+      cor: "#c2410c",
+    },
+    conta_nova: {
+      texto: "Nova conta detectada — confirme se pertence a esta empresa",
+      cor: "#7c3aed",
+    },
+    incompleto: {
+      texto: "A IA não identificou o número da conta — verifique o arquivo",
+      cor: "#d97706",
+    },
+    nao_reconhecido: {
+      texto: "A IA não conseguiu identificar este arquivo",
+      cor: "#d97706",
+    },
+  };
+
+  const { texto, cor } = razaoInfo[grupo.razao];
   const opcoes: { key: Acao; label: string; desc: string; cor: string; bg: string }[] = [
-    { key: "salvar_aqui", label: "Salvar aqui",   desc: "Aceita na empresa atual",           cor: "#15803d", bg: "#f0fdf4" },
+    { key: "salvar_aqui", label: "Salvar aqui",    desc: "Aceita na empresa atual",               cor: "#15803d", bg: "#f0fdf4" },
     { key: "fila_espera", label: "Fila de espera", desc: "Aguarda ser puxado pela empresa certa", cor: "#7c3aed", bg: "#faf5ff" },
-    { key: "baixar",      label: "Baixar arquivo", desc: "Faz download e descarta do sistema",   cor: "#6b7280", bg: "#f9fafb" },
+    { key: "baixar",      label: "Baixar arquivo", desc: "Faz download e descarta do sistema",    cor: "#6b7280", bg: "#f9fafb" },
   ];
 
   return (
     <div style={{ padding: "12px 14px", background: "#fff7ed", border: `1px solid ${acaoSelecionada ? "#d1d5db" : "#fed7aa"}`, borderRadius: 8, marginBottom: 8 }}>
       <div style={{ marginBottom: 10 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{titulo}</span>
-        {numArquivos > 1 && <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 8 }}>{numArquivos} arquivos</span>}
-        <p style={{ fontSize: 12, color: corSubtitulo, marginTop: 2 }}>{subtitulo}</p>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{grupo.label}</span>
+          {grupo.documentos.length > 1 && <span style={{ fontSize: 11, color: "#9ca3af" }}>{grupo.documentos.length} arquivos</span>}
+        </div>
+        <p style={{ fontSize: 12, color: cor, marginTop: 3 }}>{texto}</p>
+        {grupo.cnpjExtraido && (
+          <p style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+            CNPJ lido no documento: <strong>{_formatCnpj(grupo.cnpjExtraido)}</strong>
+          </p>
+        )}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {opcoes.map((op) => {
@@ -485,14 +546,11 @@ function DecisaoCard({ titulo, subtitulo, corSubtitulo, numArquivos, acaoSelecio
                 background: ativo ? op.bg : "white",
                 color: ativo ? op.cor : "#374151",
                 border: `1px solid ${ativo ? op.cor : "#d1d5db"}`,
-                borderRadius: 6,
-                fontSize: 12,
-                fontWeight: ativo ? 700 : 400,
-                cursor: "pointer",
-                transition: "all 0.1s",
+                borderRadius: 6, fontSize: 12, fontWeight: ativo ? 700 : 400,
+                cursor: "pointer", transition: "all 0.1s",
               }}
             >
-              {op.label}
+              {ativo ? "✓ " : ""}{op.label}
             </button>
           );
         })}
@@ -505,9 +563,9 @@ function DecisaoCard({ titulo, subtitulo, corSubtitulo, numArquivos, acaoSelecio
 
 function StepBar({ step }: { step: Step }) {
   const etapas = [
-    { keys: ["selecao", "scan_loading"],     label: "1 · Selecionar" },
-    { keys: ["pre_classif", "confirm_loading"], label: "2 · Revisar" },
-    { keys: ["resultados"],                  label: "3 · Resultado" },
+    { keys: ["selecao", "scan_loading"],        label: "1 · Selecionar" },
+    { keys: ["pre_classif", "confirm_loading"],  label: "2 · Revisar" },
+    { keys: ["resultados"],                      label: "3 · Resultado" },
   ];
   const stepIdx = etapas.findIndex((e) => e.keys.includes(step));
 
@@ -518,7 +576,12 @@ function StepBar({ step }: { step: Step }) {
         const active = i === stepIdx;
         return (
           <div key={i} style={{ display: "flex", alignItems: "center" }}>
-            <span style={{ fontSize: 12, fontWeight: active ? 700 : 500, color: active ? "#c4a030" : done ? "#16a34a" : "#9ca3af", padding: "4px 10px", borderRadius: 20, background: active ? "rgba(196,160,48,0.12)" : "transparent" }}>
+            <span style={{
+              fontSize: 12, fontWeight: active ? 700 : 500,
+              color: active ? "#c4a030" : done ? "#16a34a" : "#9ca3af",
+              padding: "4px 10px", borderRadius: 20,
+              background: active ? "rgba(196,160,48,0.12)" : "transparent",
+            }}>
               {done ? "✓ " : ""}{e.label}
             </span>
             {i < etapas.length - 1 && <span style={{ color: "#d1d5db", margin: "0 4px", fontSize: 12 }}>→</span>}
@@ -545,14 +608,15 @@ function ResultadoRow({ resultado, empresaId, acaoFinalizada, onAcaoFinalizada, 
   const [manualForm, setManualForm] = useState({ tipo: "extrato_bancario", mes_referencia: "", banco: "", conta: "" });
 
   const { status } = resultado;
-  const cfg = {
-    classificado:          { icon: "✓", color: "#16a34a", bg: "#f0fdf4",  label: "Classificado" },
-    duplicata:             { icon: "⚠", color: "#c2410c", bg: "#fff7ed",  label: "Duplicata" },
-    nao_reconhecido:       { icon: "?", color: "#d97706", bg: "#fefce8",  label: "Não identificado" },
-    aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff", label: "Fila de espera" },
+  const cfg = ({
+    classificado:          { icon: "✓",  color: "#16a34a", bg: "#f0fdf4",  label: "Classificado" },
+    duplicata:             { icon: "⚠",  color: "#c2410c", bg: "#fff7ed",  label: "Duplicata" },
+    nao_reconhecido:       { icon: "?",  color: "#d97706", bg: "#fefce8",  label: "Não identificado" },
+    aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff",  label: "Fila de espera" },
     baixado:               { icon: "⬇", color: "#6b7280", bg: "#f9fafb",  label: "Baixado" },
-    erro:                  { icon: "✗", color: "#b91c1c", bg: "#fef2f2",  label: "Erro" },
-  }[status] ?? { icon: "·", color: "#6b7280", bg: "#f9fafb", label: status };
+    erro:                  { icon: "✗",  color: "#b91c1c", bg: "#fef2f2",  label: "Erro" },
+  } as Record<string, { icon: string; color: string; bg: string; label: string }>)[status]
+    ?? { icon: "·", color: "#6b7280", bg: "#f9fafb", label: status };
 
   async function logAcao(tipo_acao: string, detalhes?: object) {
     try {
@@ -754,9 +818,20 @@ function Detail({ label, value, highlight }: { label: string; value: string; hig
 const lbl: React.CSSProperties = { display: "block", fontSize: 11, color: "#6b7280", marginBottom: 3, fontWeight: 500 };
 const inp: React.CSSProperties = { width: "100%", padding: "5px 8px", border: "1px solid #d1d5db", borderRadius: 5, fontSize: 12, background: "white", boxSizing: "border-box" };
 
-const _MESES: Record<string, string> = { "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril", "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto", "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro" };
+const _MESES: Record<string, string> = {
+  "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
+  "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
+  "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro",
+};
+
 function _mesPtBR(mes: string) {
   if (mes.length !== 7) return mes;
   const [ano, m] = mes.split("-");
   return `${_MESES[m] ?? m}/${ano}`;
+}
+
+function _formatCnpj(raw: string): string {
+  const d = raw.replace(/\D/g, "");
+  if (d.length !== 14) return raw;
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
 }
