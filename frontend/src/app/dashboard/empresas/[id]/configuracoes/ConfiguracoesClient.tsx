@@ -42,7 +42,7 @@ type Pendencia = DocumentoEsperado & { mes_referencia: string; recebido: boolean
 
 type Aba = "contas" | "docs" | "pendencias";
 
-export default function ConfiguracoesClient({ empresa }: { empresa: Empresa }) {
+export default function ConfiguracoesClient({ empresa, inline }: { empresa: Empresa; inline?: boolean }) {
   const [aba, setAba] = useState<Aba>("contas");
   const [contas, setContas] = useState<ContaBancaria[]>([]);
   const [docs, setDocs] = useState<DocumentoEsperado[]>([]);
@@ -52,7 +52,8 @@ export default function ConfiguracoesClient({ empresa }: { empresa: Empresa }) {
     const d = new Date(); return { ano: d.getFullYear(), mes: d.getMonth() + 1 };
   });
 
-  useEffect(() => { carregarContas(); carregarDocs(); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { carregarContas(); carregarDocs(); }, [empresa.id]);
   useEffect(() => { if (aba === "pendencias") carregarPendencias(); }, [aba, mesPend]);
 
   async function carregarContas() {
@@ -81,13 +82,15 @@ export default function ConfiguracoesClient({ empresa }: { empresa: Empresa }) {
   const totalPend = pendencias.filter((p) => !p.recebido).length;
 
   return (
-    <div style={{ maxWidth: 820, padding: "32px 24px" }}>
+    <div style={{ maxWidth: 820, padding: inline ? "0 0 32px" : "32px 24px" }}>
       {/* Cabeçalho */}
       <div style={{ marginBottom: 24 }}>
-        <Link href={`/dashboard/empresas/${empresa.id}`}
-          style={{ fontSize: 12, color: "#6b7280", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
-          ← {empresa.nome}
-        </Link>
+        {!inline && (
+          <Link href={`/dashboard/empresas/${empresa.id}`}
+            style={{ fontSize: 12, color: "#6b7280", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
+            ← {empresa.nome}
+          </Link>
+        )}
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e", margin: 0 }}>Configurações</h1>
         <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>Contas bancárias e documentos esperados mensalmente</p>
       </div>
@@ -345,6 +348,13 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
   empresaId: string; docs: DocumentoEsperado[]; contas: ContaBancaria[]; onRefresh: () => void;
 }) {
   const [form, setForm] = useState<Partial<DocumentoEsperado> | null>(null);
+
+  function contaLabel(id: string | null): string {
+    if (!id) return "";
+    const c = contas.find((ac) => ac.id === id);
+    if (!c) return "";
+    return `${c.banco} CC ${c.conta}${c.descricao ? ` — ${c.descricao}` : ""}`;
+  }
   const [salvando, setSalvando] = useState(false);
   const [importando, setImportando] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -432,7 +442,11 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
             <Field label="Conta vinculada (opcional)">
               <select value={form.conta_bancaria_id ?? ""} onChange={(e) => setForm({ ...form, conta_bancaria_id: e.target.value || null })} style={inputStyle}>
                 <option value="">— Sem conta vinculada —</option>
-                {contas.map((c) => <option key={c.id} value={c.id}>{c.banco} CC {c.conta}</option>)}
+                {contas.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.banco} CC {c.conta}{c.descricao ? ` — ${c.descricao}` : ""}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>
@@ -455,7 +469,7 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
               </div>
               <span style={{ fontSize: 12, color: "#6b7280" }}>
                 Tipo: {TIPOS_DOC.find((t) => t.value === d.tipo)?.label ?? d.tipo}
-                {d.conta_bancaria ? ` · Conta: ${d.conta_bancaria.banco} CC ${d.conta_bancaria.conta}` : ""}
+                {d.conta_bancaria_id ? ` · ${contaLabel(d.conta_bancaria_id)}` : ""}
               </span>
             </div>
             <div style={{ display: "flex", gap: 6 }}>

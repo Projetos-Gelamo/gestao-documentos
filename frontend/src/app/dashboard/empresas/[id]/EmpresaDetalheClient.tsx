@@ -5,9 +5,9 @@ import { useAnon } from "../../AnonContext";
 import ChecklistSection from "./ChecklistSection";
 import DocumentosTable from "./DocumentosTable";
 import TiposEsperadosSection from "./TiposEsperadosSection";
-import RevisaoPendenteSection from "./RevisaoPendenteSection";
 import AnnualView from "./anual/AnnualView";
 import ConfiguracoesClient from "./configuracoes/ConfiguracoesClient";
+
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
@@ -154,35 +154,32 @@ export default function EmpresaDetalheClient({
 
         {/* Seletor Matriz / Filial — canto superior direito */}
         {temFiliais && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>Visualizando:</span>
-            {[empresa, ...filiais].map((e) => {
-              const selecionado = entidadeId === e.id;
-              const isFilial = e.id !== empresa.id;
-              return (
-                <button
-                  key={e.id}
-                  onClick={() => trocarEntidade(e.id)}
-                  style={{
-                    padding: "5px 14px",
-                    borderRadius: 20,
-                    border: `1px solid ${selecionado ? "#c4a030" : "#d1d5db"}`,
-                    background: selecionado ? "#fef9ec" : "white",
-                    color: selecionado ? "#92400e" : "#374151",
-                    fontWeight: selecionado ? 700 : 400,
-                    fontSize: 13,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  {isFilial && <span style={{ fontSize: 10, color: "#6b7280" }}>↳</span>}
-                  {anonimizado ? `Empresa ${e.codigo}` : (isFilial ? `Filial — ${e.codigo}` : "Matriz")}
-                  {selecionado && <span style={{ fontSize: 10 }}>●</span>}
-                </button>
-              );
-            })}
+            <select
+              value={entidadeId}
+              onChange={(e) => trocarEntidade(e.target.value)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: "1px solid #c4a030",
+                background: "#fef9ec",
+                color: "#92400e",
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              <option value={empresa.id}>
+                Matriz{anonimizado ? ` — Empresa ${empresa.codigo}` : ` — ${empresa.nome}`}
+              </option>
+              {filiais.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {anonimizado ? `Filial — Empresa ${f.codigo}` : `Filial — ${f.codigo}`}
+                </option>
+              ))}
+            </select>
           </div>
         )}
       </div>
@@ -291,22 +288,16 @@ export default function EmpresaDetalheClient({
 
             {/* ── Contábil → Enviar documentos ── */}
             {aba === "contabil" && subAba === "enviar" && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 20 }}>
-                  <Link
-                    href={`/dashboard/empresas/${entidadeId}/upload`}
-                    style={{ padding: "9px 18px", background: "#c4a030", color: "#0c1a2e", borderRadius: 8, fontSize: 14, fontWeight: 600, textDecoration: "none" }}
-                  >
-                    + Enviar documento
-                  </Link>
-                </div>
-                <TiposEsperadosSection
-                  empresaId={entidadeId}
-                  departamento="contabil"
-                  filiais={entidadeId === empresa.id ? filiais.map((f) => ({ id: f.id, codigo: f.codigo, nome: f.nome })) : []}
-                  hideAutoGenerate
-                />
-                <RevisaoPendenteSection empresaId={entidadeId} />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 48, paddingBottom: 48 }}>
+                <Link
+                  href={`/dashboard/empresas/${entidadeId}/upload`}
+                  style={{ padding: "14px 36px", background: "#c4a030", color: "#0c1a2e", borderRadius: 8, fontSize: 16, fontWeight: 700, textDecoration: "none" }}
+                >
+                  + Enviar documento
+                </Link>
+                <p style={{ marginTop: 12, fontSize: 13, color: "#9ca3af" }}>
+                  Selecione um arquivo para enviar para esta empresa
+                </p>
               </div>
             )}
 
@@ -371,7 +362,7 @@ export default function EmpresaDetalheClient({
 
             {/* ── Contábil → Configurações ── */}
             {aba === "contabil" && subAba === "configuracoes" && (
-              <ConfiguracoesClient empresa={{ id: entidadeAtual.id, nome: entidadeAtual.nome, cnpj: entidadeAtual.cnpj, codigo: entidadeAtual.codigo }} />
+              <ConfiguracoesClient inline empresa={{ id: entidadeAtual.id, nome: entidadeAtual.nome, cnpj: entidadeAtual.cnpj, codigo: entidadeAtual.codigo }} />
             )}
 
             {/* ── Dep. Pessoal / Legal / Fiscal ── */}
