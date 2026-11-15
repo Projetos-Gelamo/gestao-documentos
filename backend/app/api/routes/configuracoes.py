@@ -57,6 +57,7 @@ class ContaPreviewItem(BaseModel):
     conta: str
     tipo: str
     cnpj: str | None
+    descricao: str | None = None
     empresa_id_destino: str
     empresa_nome_destino: str
     diferente: bool
@@ -349,12 +350,14 @@ async def preview_importar_contas(empresa_id: UUID, file: UploadFile = File(...)
         conta = str(row[2] or "").strip()
         tipo_raw = str(row[3] or "corrente").strip().lower().replace(" ", "_")
         cnpj = str(row[4] or "").strip() or None
+        descricao = str(row[5] or "").strip() or None if len(row) > 5 else None
         if not banco or not conta:
             continue
         tipo = tipo_raw if tipo_raw in ("corrente", "poupanca", "investimento", "conta_garantida") else "corrente"
         emp_id, emp_nome, cnpj_desconhecido = _find_empresa(cnpj)
         items.append(ContaPreviewItem(
             linha=idx, banco=banco, agencia=agencia, conta=conta, tipo=tipo, cnpj=cnpj,
+            descricao=descricao,
             empresa_id_destino=emp_id, empresa_nome_destino=emp_nome,
             diferente=(emp_id != str(empresa_id)) or cnpj_desconhecido,
         ))

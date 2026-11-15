@@ -23,7 +23,7 @@ type Empresa = { id: string; nome: string; cnpj: string; codigo: string };
 
 type PreviewItem = {
   linha: number; banco: string; agencia: string | null; conta: string;
-  tipo: string; cnpj: string | null;
+  tipo: string; cnpj: string | null; descricao: string | null;
   empresa_id_destino: string; empresa_nome_destino: string; diferente: boolean;
 };
 
@@ -171,6 +171,7 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
         body: JSON.stringify(items.map((i) => ({
           empresa_id_destino: i.empresa_id_destino,
           banco: i.banco, agencia: i.agencia, conta: i.conta, tipo: i.tipo, cnpj: i.cnpj,
+          descricao: i.descricao,
         }))),
       });
       const d = await r.json();
