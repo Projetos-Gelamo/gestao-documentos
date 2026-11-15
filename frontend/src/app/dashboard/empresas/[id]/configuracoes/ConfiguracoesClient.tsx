@@ -51,19 +51,25 @@ export default function ConfiguracoesClient({ empresa }: { empresa: Empresa }) {
 
   async function carregarContas() {
     setLoading(true);
-    const r = await fetch(`${API}/empresas/${empresa.id}/contas-bancarias`);
-    setContas(r.ok ? await r.json() : []);
-    setLoading(false);
+    try {
+      const r = await fetch(`${API}/empresas/${empresa.id}/contas-bancarias`);
+      setContas(r.ok ? await r.json() : []);
+    } catch { setContas([]); }
+    finally { setLoading(false); }
   }
 
   async function carregarDocs() {
-    const r = await fetch(`${API}/empresas/${empresa.id}/documentos-esperados`);
-    setDocs(r.ok ? await r.json() : []);
+    try {
+      const r = await fetch(`${API}/empresas/${empresa.id}/documentos-esperados`);
+      setDocs(r.ok ? await r.json() : []);
+    } catch { setDocs([]); }
   }
 
   async function carregarPendencias() {
-    const r = await fetch(`${API}/empresas/${empresa.id}/pendencias/${mesPend.ano}/${mesPend.mes}`);
-    setPendencias(r.ok ? await r.json() : []);
+    try {
+      const r = await fetch(`${API}/empresas/${empresa.id}/pendencias/${mesPend.ano}/${mesPend.mes}`);
+      setPendencias(r.ok ? await r.json() : []);
+    } catch { setPendencias([]); }
   }
 
   const totalPend = pendencias.filter((p) => !p.recebido).length;
@@ -234,8 +240,8 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
               </span>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <BtnIcon onClick={() => setForm({ ...c })}>✎</BtnIcon>
-              <BtnIcon onClick={() => deletar(c.id)} danger>✕</BtnIcon>
+              <BtnIcon onClick={() => setForm({ ...c })} />
+              <BtnIcon onClick={() => deletar(c.id)} danger />
             </div>
           </div>
         ))}
@@ -362,8 +368,8 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
               </span>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <BtnIcon onClick={() => setForm({ ...d, conta_bancaria_id: d.conta_bancaria_id })}>✎</BtnIcon>
-              <BtnIcon onClick={() => deletar(d.id)} danger>✕</BtnIcon>
+              <BtnIcon onClick={() => setForm({ ...d, conta_bancaria_id: d.conta_bancaria_id })} />
+              <BtnIcon onClick={() => deletar(d.id)} danger />
             </div>
           </div>
         ))}
