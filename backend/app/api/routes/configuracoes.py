@@ -312,11 +312,30 @@ async def preview_importar_contas(empresa_id: UUID, file: UploadFile = File(...)
 
 @router.post("/empresas/{empresa_id}/confirmar-importar-contas", status_code=201)
 async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmarItem]):
-    """Salva contas confirmadas pelo usuário, cada uma na empresa destino resolvida."""
+    """Salva contas confirmadas pelo usuário, cada uma na empresa destino resolvida.
+    Ignora contas cujo número já existe na empresa destino (evita duplicatas)."""
     supabase = get_supabase()
+
+    # Carrega contas existentes de todas as empresas destino para deduplicar
+    dest_ids = list({item.empresa_id_destino for item in items})
+    existing_keys: set[tuple[str, str]] = set()
+    for eid in dest_ids:
+        try:
+            res = (supabase.schema("gestao_docs").from_("conta_bancaria")
+                   .select("empresa_id,conta").eq("empresa_id", eid).execute())
+            for row in res.data or []:
+                existing_keys.add((row["empresa_id"], (row["conta"] or "").strip()))
+        except Exception:
+            pass
+
     inseridos = 0
+    ignorados = 0
     erros: list[str] = []
     for item in items:
+        key = (item.empresa_id_destino, item.conta.strip())
+        if key in existing_keys:
+            ignorados += 1
+            continue
         try:
             supabase.schema("gestao_docs").from_("conta_bancaria").insert({
                 "empresa_id": item.empresa_id_destino,
@@ -327,15 +346,16 @@ async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmar
                 "cnpj": item.cnpj,
             }).execute()
             inseridos += 1
+            existing_keys.add(key)
         except Exception as exc:
             err_str = str(exc)
-            if "tipo_check" in err_str or "tipo" in err_str and "check" in err_str:
+            if "tipo_check" in err_str or ("tipo" in err_str and "check" in err_str):
                 erros.append(f"{item.banco} / {item.conta}: tipo '{item.tipo}' não é aceito pelo banco de dados")
             elif "duplicate" in err_str.lower() or "unique" in err_str.lower():
                 erros.append(f"{item.banco} / {item.conta}: conta já cadastrada")
             else:
                 erros.append(f"{item.banco} / {item.conta}: erro ao salvar")
-    return {"inseridos": inseridos, "erros": erros}
+    return {"inseridos": inseridos, "ignorados": ignorados, "erros": erros}
 
 
 @router.post("/empresas/{empresa_id}/importar-documentos", status_code=201)
