@@ -123,15 +123,17 @@ async def upload_documento(
 
     # Valida CNPJ: documento pertence a esta empresa?
     empresa_errada = False
+    empresa_destino_id: str | None = None
+
+    def _normaliza_cnpj(c: str) -> str:
+        return "".join(ch for ch in c if ch.isdigit())
+
     if (
         result.cnpj
         and cnpj_empresa
         and status not in (DocumentoStatus.nao_reconhecido,)
         and result.confidence >= 0.80
     ):
-        def _normaliza_cnpj(c: str) -> str:
-            return "".join(ch for ch in c if ch.isdigit())
-
         cnpj_doc = _normaliza_cnpj(result.cnpj)
         cnpj_emp = _normaliza_cnpj(cnpj_empresa)
         if cnpj_doc and cnpj_emp and cnpj_doc != cnpj_emp:
@@ -141,6 +143,15 @@ async def upload_documento(
                 "Empresa errada: doc CNPJ=%s, empresa CNPJ=%s (empresa_id=%s)",
                 cnpj_doc, cnpj_emp, empresa_id,
             )
+            # Tenta encontrar a empresa correta pelo CNPJ do documento
+            try:
+                todas = supabase.schema("gestao_docs").from_("empresa").select("id,cnpj").execute()
+                for e in (todas.data or []):
+                    if _normaliza_cnpj(e.get("cnpj") or "") == cnpj_doc:
+                        empresa_destino_id = e["id"]
+                        break
+            except Exception:
+                pass
 
     # Detecta duplicata: mesmo empresa + tipo + mes + banco (fuzzy) + conta (só se não for empresa errada)
     duplicata_de: str | None = None
@@ -241,4 +252,5 @@ async def upload_documento(
         nome_sugerido=_nome_sugerido(result.doc_type, result.mes_referencia, result.banco, result.conta),
         duplicata_de=duplicata_de,
         cnpj_empresa_esperado=cnpj_empresa if empresa_errada else None,
+        empresa_destino_id=empresa_destino_id,
     )

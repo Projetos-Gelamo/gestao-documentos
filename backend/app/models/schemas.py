@@ -236,7 +236,8 @@ class UploadResult(BaseModel):
     na_fila_revisao: bool
     nome_sugerido: str | None
     duplicata_de: str | None = None          # id do documento já existente, se duplicata
-    cnpj_empresa_esperado: str | None = None  # CNPJ da empresa destino (para alerta empresa_errada)
+    cnpj_empresa_esperado: str | None = None  # CNPJ da empresa atual (para alerta empresa_errada)
+    empresa_destino_id: str | None = None    # ID da empresa correta (derivado do CNPJ do documento)
 
 
 # ---------------------------------------------------------------------------

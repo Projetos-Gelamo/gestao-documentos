@@ -5,6 +5,7 @@ import { useAnon } from "../../AnonContext";
 import ChecklistSection from "./ChecklistSection";
 import DocumentosTable from "./DocumentosTable";
 import TiposEsperadosSection from "./TiposEsperadosSection";
+import RevisaoPendenteSection from "./RevisaoPendenteSection";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
@@ -296,7 +297,14 @@ export default function EmpresaDetalheClient({
           )}
 
           {/* Tipos esperados da entidade selecionada */}
-          <TiposEsperadosSection empresaId={entidadeId} departamento={aba} />
+          <TiposEsperadosSection
+            empresaId={entidadeId}
+            departamento={aba}
+            filiais={entidadeId === empresa.id ? filiais.map((f) => ({ id: f.id, codigo: f.codigo, nome: f.nome })) : []}
+          />
+
+          {/* Revisão pendente da entidade selecionada */}
+          {aba === "contabil" && <RevisaoPendenteSection empresaId={entidadeId} />}
 
           {/* Documentos da entidade selecionada */}
           <div style={{ marginTop: 28 }}>

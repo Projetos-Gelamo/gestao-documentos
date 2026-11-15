@@ -107,53 +107,74 @@ def get_checklist(empresa_id: str, mes: str):
 
 
 @router.post("/empresas/{empresa_id}/configuracao-automatica")
-def configuracao_automatica(empresa_id: str, dry_run: bool = True):
+def configuracao_automatica(empresa_id: str, dry_run: bool = True, incluir_filiais: bool = False):
     """
-    Analisa documentos classificados da empresa e sugere (ou cria) entradas em
-    tipo_documento_esperado para combinações (tipo, banco, conta) ainda não cadastradas.
-    dry_run=True (padrão) → apenas preview. dry_run=False → cria no banco.
+    Analisa documentos classificados e sugere (ou cria) tipos_documento_esperado.
+    Com incluir_filiais=True, inclui filiais da empresa na análise.
+    dry_run=True → apenas preview (com empresa_id por item). dry_run=False → cria no banco.
     """
     supabase = get_supabase()
 
-    docs_res = (
-        supabase.schema("gestao_docs").from_("documento")
-        .select("tipo,banco,conta")
-        .eq("empresa_id", empresa_id)
-        .eq("status", "classificado")
-        .execute()
-    )
-    docs = docs_res.data or []
+    # Coleta todas as entidades a analisar
+    entidades = [empresa_id]
+    if incluir_filiais:
+        try:
+            fil_res = (
+                supabase.schema("gestao_docs").from_("empresa")
+                .select("id")
+                .eq("matriz_id", empresa_id)
+                .execute()
+            )
+            for f in (fil_res.data or []):
+                entidades.append(f["id"])
+        except Exception:
+            pass
 
+    # Existentes em todas as entidades relevantes
     existentes_res = (
         supabase.schema("gestao_docs").from_("tipo_documento_esperado")
-        .select("tipo,banco,conta")
-        .eq("empresa_id", empresa_id)
+        .select("tipo,banco,conta,empresa_id")
+        .in_("empresa_id", entidades)
         .execute()
     )
     existentes_set = {
-        (e.get("tipo") or "", (e.get("banco") or "").lower().strip(), (e.get("conta") or "").lower().strip())
+        (
+            e.get("tipo") or "",
+            (e.get("banco") or "").lower().strip(),
+            (e.get("conta") or "").lower().strip(),
+            e.get("empresa_id") or "",
+        )
         for e in (existentes_res.data or [])
     }
 
     seen: set[tuple] = set()
     novos: list[dict] = []
-    for doc in docs:
-        tipo = doc.get("tipo") or ""
-        if not tipo:
-            continue
-        banco = (doc.get("banco") or "").strip()
-        conta = (doc.get("conta") or "").strip()
-        key = (tipo, banco.lower(), conta.lower())
-        if key in seen or key in existentes_set:
-            continue
-        seen.add(key)
-        novos.append({
-            "empresa_id": empresa_id,
-            "tipo": tipo,
-            "banco": banco or None,
-            "conta": conta or None,
-            "periodicidade": "mensal",
-        })
+
+    for eid in entidades:
+        docs_res = (
+            supabase.schema("gestao_docs").from_("documento")
+            .select("tipo,banco,conta")
+            .eq("empresa_id", eid)
+            .eq("status", "classificado")
+            .execute()
+        )
+        for doc in (docs_res.data or []):
+            tipo = doc.get("tipo") or ""
+            if not tipo:
+                continue
+            banco = (doc.get("banco") or "").strip()
+            conta = (doc.get("conta") or "").strip()
+            key = (tipo, banco.lower(), conta.lower(), eid)
+            if key in seen or key in existentes_set:
+                continue
+            seen.add(key)
+            novos.append({
+                "empresa_id": eid,
+                "tipo": tipo,
+                "banco": banco or None,
+                "conta": conta or None,
+                "periodicidade": "mensal",
+            })
 
     if dry_run or not novos:
         return {"dry_run": True, "preview": novos, "total": len(novos)}

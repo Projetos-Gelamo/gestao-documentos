@@ -4,18 +4,18 @@ import { useEffect, useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
 const TODOS_TIPOS_DOC = [
-  { value: "extrato_bancario", label: "Extrato Bancário" },
-  { value: "nota_fiscal", label: "Nota Fiscal" },
-  { value: "folha_pagamento", label: "Folha de Pagamento" },
-  { value: "guia_pagamento", label: "Guia de Pagamento" },
+  { value: "extrato_bancario",      label: "Extrato Bancário" },
+  { value: "nota_fiscal",           label: "Nota Fiscal" },
+  { value: "folha_pagamento",       label: "Folha de Pagamento" },
+  { value: "guia_pagamento",        label: "Guia de Pagamento" },
   { value: "comprovante_pagamento", label: "Comprovante de Pagamento" },
-  { value: "contrato_emprestimo", label: "Contrato de Empréstimo" },
-  { value: "contrato", label: "Contrato" },
-  { value: "planilha_financeira", label: "Planilha Financeira" },
-  { value: "dre", label: "DRE" },
-  { value: "balancete", label: "Balancete" },
-  { value: "recibo", label: "Recibo" },
-  { value: "outros", label: "Outros" },
+  { value: "contrato_emprestimo",   label: "Contrato de Empréstimo" },
+  { value: "contrato",              label: "Contrato" },
+  { value: "planilha_financeira",   label: "Planilha Financeira" },
+  { value: "dre",                   label: "DRE" },
+  { value: "balancete",             label: "Balancete" },
+  { value: "recibo",                label: "Recibo" },
+  { value: "outros",                label: "Outros" },
 ];
 
 const TIPOS_BY_DEPT: Record<string, string[]> = {
@@ -40,22 +40,37 @@ type AutoPreviewItem = {
   banco: string | null;
   conta: string | null;
   periodicidade: string;
+  empresa_id: string;
 };
 
-export default function TiposEsperadosSection({ empresaId, departamento }: { empresaId: string; departamento?: string }) {
+type EntidadeInfo = { id: string; codigo: string; nome: string };
+
+export default function TiposEsperadosSection({
+  empresaId,
+  departamento,
+  filiais = [],
+}: {
+  empresaId: string;
+  departamento?: string;
+  filiais?: EntidadeInfo[];
+}) {
   const allowedTipos = departamento ? (TIPOS_BY_DEPT[departamento] ?? []) : TODOS_TIPOS_DOC.map((t) => t.value);
   const TIPOS_DOC = TODOS_TIPOS_DOC.filter((t) => allowedTipos.includes(t.value));
+
   const [todos, setTodos] = useState<Tipo[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ tipo: allowedTipos[0] ?? "extrato_bancario", banco: "", conta: "", agencia: "", descricao: "" });
 
-  const tipos = departamento
-    ? todos.filter((t) => allowedTipos.includes(t.tipo))
-    : todos;
+  const tipos = departamento ? todos.filter((t) => allowedTipos.includes(t.tipo)) : todos;
+
   const [autoPreview, setAutoPreview] = useState<AutoPreviewItem[] | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoConfirming, setAutoConfirming] = useState(false);
+  // entidade selecionada per item (índice → empresa_id)
+  const [previewEntidades, setPreviewEntidades] = useState<Record<number, string>>({});
+
+  const temFiliais = filiais.length > 0;
 
   useEffect(() => {
     fetch(`${API}/empresas/${empresaId}/tipos-esperados`)
@@ -97,9 +112,15 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
     setAutoLoading(true);
     setAutoPreview(null);
     try {
-      const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=true`, { method: "POST" });
+      const url = `${API}/empresas/${empresaId}/configuracao-automatica?dry_run=true${temFiliais ? "&incluir_filiais=true" : ""}`;
+      const res = await fetch(url, { method: "POST" });
       const data = res.ok ? await res.json() : { preview: [] };
-      setAutoPreview(data.preview ?? []);
+      const items: AutoPreviewItem[] = data.preview ?? [];
+      setAutoPreview(items);
+      // Pré-popula entidade selecionada com o valor sugerido pelo backend
+      const defaults: Record<number, string> = {};
+      items.forEach((item, i) => { defaults[i] = item.empresa_id ?? empresaId; });
+      setPreviewEntidades(defaults);
     } catch (err) {
       console.error("Erro ao gerar preview:", err);
       setAutoPreview([]);
@@ -109,25 +130,42 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
   }
 
   async function handleAutoConfirm() {
+    if (!autoPreview?.length) return;
     setAutoConfirming(true);
+    const criados: Tipo[] = [];
     try {
-      const res = await fetch(`${API}/empresas/${empresaId}/configuracao-automatica?dry_run=false`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        const criados: Tipo[] = (data.preview ?? []).map((item: any) => ({
-          id: item.id ?? String(Math.random()),
+      for (let i = 0; i < autoPreview.length; i++) {
+        const item = autoPreview[i];
+        const selectedEmpresaId = previewEntidades[i] ?? item.empresa_id ?? empresaId;
+        const body = {
+          empresa_id: selectedEmpresaId,
           tipo: item.tipo,
           banco: item.banco ?? null,
           conta: item.conta ?? null,
-          agencia: null,
-          descricao: null,
-        }));
-        setTodos((prev) => [...prev, ...criados]);
-        setAutoPreview(null);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        alert(`Erro ao salvar configuração: ${err.detail ?? `HTTP ${res.status}`}. Tente novamente.`);
+          periodicidade: "mensal",
+        };
+        const res = await fetch(`${API}/empresas/${selectedEmpresaId}/tipos-esperados`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          const novo = await res.json();
+          // Só adiciona à lista visível se for da entidade atual
+          if (selectedEmpresaId === empresaId) {
+            criados.push({
+              id: novo.id ?? String(Math.random()),
+              tipo: novo.tipo,
+              banco: novo.banco ?? null,
+              conta: novo.conta ?? null,
+              agencia: null,
+              descricao: null,
+            });
+          }
+        }
       }
+      setTodos((prev) => [...prev, ...criados]);
+      setAutoPreview(null);
     } catch (err) {
       console.error("Erro ao confirmar configuração automática:", err);
       alert("Erro de conexão ao salvar. Tente novamente.");
@@ -136,7 +174,13 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
     }
   }
 
-  const tipoLabel = (val: string) => TIPOS_DOC.find((t) => t.value === val)?.label ?? val;
+  const tipoLabel = (val: string) => TODOS_TIPOS_DOC.find((t) => t.value === val)?.label ?? val;
+
+  function entidadeNome(id: string) {
+    if (id === empresaId) return "Matriz";
+    const f = filiais.find((f) => f.id === id);
+    return f ? `Filial — ${f.codigo}` : "Filial";
+  }
 
   return (
     <div style={{ marginTop: 32 }}>
@@ -162,16 +206,32 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
           </p>
           {autoPreview.length > 0 && (
             <>
-              <ul style={{ margin: "0 0 12px 0", padding: "0 0 0 16px", fontSize: 13 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
                 {autoPreview.map((item, i) => (
-                  <li key={i} style={{ marginBottom: 4 }}>
-                    <strong>{tipoLabel(item.tipo)}</strong>
-                    {item.banco && <span style={{ color: "#6b7280" }}> — {item.banco}</span>}
-                    {item.conta && <span style={{ color: "#6b7280" }}> CC {item.conta}</span>}
-                    <span style={{ color: "#9ca3af" }}> (mensal)</span>
-                  </li>
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "white", borderRadius: 6, fontSize: 13 }}>
+                    <div style={{ flex: 1 }}>
+                      <strong>{tipoLabel(item.tipo)}</strong>
+                      {item.banco && <span style={{ color: "#6b7280" }}> — {item.banco}</span>}
+                      {item.conta && <span style={{ color: "#6b7280" }}> CC {item.conta}</span>}
+                    </div>
+                    {temFiliais && (
+                      <select
+                        value={previewEntidades[i] ?? item.empresa_id ?? empresaId}
+                        onChange={(e) => setPreviewEntidades((prev) => ({ ...prev, [i]: e.target.value }))}
+                        style={{ fontSize: 12, padding: "3px 8px", border: "1px solid #d1d5db", borderRadius: 5, background: "#f9fafb", color: "#374151" }}
+                      >
+                        <option value={empresaId}>Matriz</option>
+                        {filiais.map((f) => (
+                          <option key={f.id} value={f.id}>Filial — {f.codigo}</option>
+                        ))}
+                      </select>
+                    )}
+                    {!temFiliais && (
+                      <span style={{ fontSize: 11, color: "#9ca3af" }}>mensal</span>
+                    )}
+                  </div>
                 ))}
-              </ul>
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   onClick={handleAutoConfirm}
@@ -199,6 +259,7 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
           )}
         </div>
       )}
+
       {loading ? (
         <p style={{ fontSize: 13, color: "#9ca3af" }}>Carregando...</p>
       ) : tipos.length === 0 ? (
@@ -219,7 +280,6 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
         </div>
       )}
 
-      {/* Formulário de adição */}
       <details>
         <summary style={{ cursor: "pointer", fontSize: 13, color: "#2563eb", fontWeight: 500 }}>+ Adicionar documento esperado</summary>
         <div style={{ marginTop: 12, padding: 16, background: "#f9fafb", borderRadius: 8, display: "grid", gap: 10 }}>
@@ -230,18 +290,16 @@ export default function TiposEsperadosSection({ empresaId, departamento }: { emp
             </select>
           </div>
           {form.tipo === "extrato_bancario" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div>
-                  <label style={labelStyle}>Banco</label>
-                  <input placeholder="Ex: Itaú" value={form.banco} onChange={(e) => setForm({ ...form, banco: e.target.value })} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Conta corrente</label>
-                  <input placeholder="Ex: 12345-6" value={form.conta} onChange={(e) => setForm({ ...form, conta: e.target.value })} style={inputStyle} />
-                </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={labelStyle}>Banco</label>
+                <input placeholder="Ex: Itaú" value={form.banco} onChange={(e) => setForm({ ...form, banco: e.target.value })} style={inputStyle} />
               </div>
-            </>
+              <div>
+                <label style={labelStyle}>Conta corrente</label>
+                <input placeholder="Ex: 12345-6" value={form.conta} onChange={(e) => setForm({ ...form, conta: e.target.value })} style={inputStyle} />
+              </div>
+            </div>
           )}
           <div>
             <label style={labelStyle}>Descrição (opcional)</label>

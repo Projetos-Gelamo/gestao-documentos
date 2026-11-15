@@ -121,3 +121,95 @@ async def delete_documento(
         "excluido_por": excluido_por or "sistema",
         "arquivo_removido": storage_removed,
     }
+
+
+@router.post("/{documento_id}/substituir/{original_id}", status_code=200)
+async def substituir_duplicata(documento_id: UUID, original_id: UUID):
+    """Duplicata: exclui o original do storage e DB, promove o novo para classificado."""
+    supabase = get_supabase()
+    agora = datetime.now(timezone.utc).isoformat()
+
+    orig = (
+        supabase.schema("gestao_docs").from_("documento")
+        .select("id,storage_path,excluido_em")
+        .eq("id", str(original_id))
+        .single()
+        .execute()
+    )
+    if orig.data and not orig.data.get("excluido_em"):
+        if orig.data.get("storage_path"):
+            try:
+                supabase.storage.from_(STORAGE_BUCKET).remove([orig.data["storage_path"]])
+            except Exception as exc:
+                logger.warning("Storage remove falhou ao substituir: %s", exc)
+        supabase.schema("gestao_docs").from_("documento").update({
+            "excluido_em": agora,
+            "excluido_por": "sistema",
+            "status": "excluido",
+        }).eq("id", str(original_id)).execute()
+
+    supabase.schema("gestao_docs").from_("documento").update({
+        "status": "classificado",
+    }).eq("id", str(documento_id)).execute()
+
+    return {"ok": True, "original_excluido": str(original_id), "novo_classificado": str(documento_id)}
+
+
+@router.post("/{documento_id}/mover-empresa/{empresa_destino_id}", status_code=200)
+async def mover_empresa(documento_id: UUID, empresa_destino_id: UUID):
+    """Empresa errada: move o documento para a empresa correta e classifica."""
+    supabase = get_supabase()
+
+    emp = (
+        supabase.schema("gestao_docs").from_("empresa")
+        .select("id")
+        .eq("id", str(empresa_destino_id))
+        .single()
+        .execute()
+    )
+    if not emp.data:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Empresa destino não encontrada")
+
+    supabase.schema("gestao_docs").from_("documento").update({
+        "empresa_id": str(empresa_destino_id),
+        "status": "classificado",
+    }).eq("id", str(documento_id)).execute()
+
+    try:
+        supabase.schema("gestao_docs").from_("fila_revisao").delete().eq(
+            "documento_id", str(documento_id)
+        ).execute()
+    except Exception:
+        pass
+
+    return {"ok": True, "empresa_destino_id": str(empresa_destino_id)}
+
+
+@router.post("/{documento_id}/classificar-manual", status_code=200)
+async def classificar_manual(documento_id: UUID, update: DocumentoUpdate):
+    """Não reconhecido: classifica manualmente pelo usuário."""
+    supabase = get_supabase()
+
+    payload = update.model_dump(exclude_none=True)
+    payload["status"] = "classificado"
+    payload["classificado_em"] = datetime.now(timezone.utc).isoformat()
+
+    res = (
+        supabase.schema("gestao_docs").from_("documento")
+        .update(payload)
+        .eq("id", str(documento_id))
+        .execute()
+    )
+    if not res.data:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    try:
+        supabase.schema("gestao_docs").from_("fila_revisao").delete().eq(
+            "documento_id", str(documento_id)
+        ).execute()
+    except Exception:
+        pass
+
+    return res.data[0]

@@ -1,39 +1,25 @@
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
+import Link from "next/link";
 
-export default async function RevisaoPage() {
-  const res = await fetch(`${API}/revisao/`, { cache: "no-store" });
-  const itens: any[] = res.ok ? await res.json() : [];
-
+export default function RevisaoPage() {
   return (
-    <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Fila de Revisão</h1>
-      {!itens.length ? (
-        <p style={{ color: "#16a34a" }}>✓ Nenhum documento aguardando revisão.</p>
-      ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: 8, boxShadow: "0 1px 3px rgba(0,0,0,.08)" }}>
-          <thead>
-            <tr style={{ background: "#fef3c7" }}>
-              <th style={th}>Empresa</th>
-              <th style={th}>Arquivo</th>
-              <th style={th}>Tipo detectado</th>
-              <th style={th}>Na fila desde</th>
-            </tr>
-          </thead>
-          <tbody>
-            {itens.map((item) => (
-              <tr key={item.id} style={{ borderTop: "1px solid #e5e7eb" }}>
-                <td style={td}>{item.documento?.empresa?.nome ?? "—"}</td>
-                <td style={td}>{item.documento?.nome_arquivo ?? "—"}</td>
-                <td style={td}>{item.documento?.tipo ?? "não reconhecido"}</td>
-                <td style={td}>{new Date(item.criado_em).toLocaleDateString("pt-BR")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+    <div style={{ maxWidth: 560 }}>
+      <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Fila de Revisão</h1>
+      <div style={{ padding: 20, background: "#fefce8", border: "1px solid #fde68a", borderRadius: 10 }}>
+        <p style={{ fontSize: 14, color: "#713f12", fontWeight: 600, marginBottom: 8 }}>
+          Esta seção foi integrada à tela de cada empresa.
+        </p>
+        <p style={{ fontSize: 13, color: "#92400e", marginBottom: 16 }}>
+          Acesse a empresa desejada e veja a seção <strong>Revisão pendente</strong> na aba Contábil.
+          Lá você pode classificar documentos não identificados, mover documentos para a empresa certa
+          e excluir duplicatas.
+        </p>
+        <Link
+          href="/dashboard/empresas"
+          style={{ padding: "9px 18px", background: "#c4a030", color: "#0c1a2e", borderRadius: 8, fontSize: 14, fontWeight: 700, textDecoration: "none" }}
+        >
+          Ir para Empresas
+        </Link>
+      </div>
     </div>
   );
 }
-
-const th: React.CSSProperties = { padding: "10px 16px", textAlign: "left", fontSize: 13, fontWeight: 600 };
-const td: React.CSSProperties = { padding: "10px 16px", fontSize: 14 };
