@@ -3,8 +3,10 @@ import re
 import unicodedata
 import uuid
 from datetime import datetime
+from typing import List
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from app.core.supabase import STORAGE_BUCKET, get_supabase
 from app.models.schemas import DocumentoStatus, UploadResult
@@ -254,3 +256,231 @@ async def upload_documento(
         cnpj_empresa_esperado=cnpj_empresa if empresa_errada else None,
         empresa_destino_id=empresa_destino_id,
     )
+
+
+# ── Novo fluxo de upload em 2 etapas ──────────────────────────────────────────
+
+class ConfirmarItem(BaseModel):
+    documento_id: str
+    empresa_destino_id: str
+
+class ConfirmarRequest(BaseModel):
+    mapeamentos: List[ConfirmarItem]
+
+
+@router.post("/scan")
+async def scan_upload(
+    empresa_id: str = Form(...),
+    files: List[UploadFile] = File(...),
+):
+    """Etapa 1: armazena arquivos e extrai info, sem checar duplicatas."""
+    supabase = get_supabase()
+    results = []
+
+    def _norm(c: str) -> str:
+        return "".join(ch for ch in c if ch.isdigit())
+
+    for file in files:
+        content = await file.read()
+        if not content:
+            continue
+
+        filename = file.filename or "arquivo"
+        content_type = file.content_type or "application/octet-stream"
+        mes_upload = datetime.now().strftime("%Y-%m")
+        file_id = str(uuid.uuid4())[:8]
+        safe_filename = _sanitize_filename(filename)
+        storage_path = f"{empresa_id}/{mes_upload}/{file_id}_{safe_filename}"
+
+        try:
+            supabase.storage.from_(STORAGE_BUCKET).upload(
+                path=storage_path,
+                file=content,
+                file_options={"content-type": content_type, "upsert": "true"},
+            )
+        except Exception as exc:
+            logger.error("Scan: erro ao salvar '%s': %s", filename, exc)
+            results.append({"nome_arquivo": filename, "erro": str(exc), "status": "erro"})
+            continue
+
+        text = extract_text(content, filename)
+        result, status = await classify_document(text, filename)
+
+        # Sugere empresa pelo CNPJ extraído
+        empresa_sugerida_id = empresa_id
+        if result.cnpj:
+            cnpj_doc = _norm(result.cnpj)
+            try:
+                todas = supabase.schema("gestao_docs").from_("empresa").select("id,cnpj").execute()
+                for e in (todas.data or []):
+                    if _norm(e.get("cnpj") or "") == cnpj_doc:
+                        empresa_sugerida_id = e["id"]
+                        break
+            except Exception:
+                pass
+
+        doc_status = "nao_reconhecido" if status == DocumentoStatus.nao_reconhecido else "aguardando_classificacao"
+        doc_data = {
+            "empresa_id": empresa_id,
+            "storage_path": storage_path,
+            "nome_arquivo": filename,
+            "tipo": result.doc_type,
+            "departamento": _DEPARTAMENTO_MAP.get(result.doc_type or "", "outros"),
+            "mes_referencia": result.mes_referencia,
+            "status": doc_status,
+            "cnpj_extraido": result.cnpj,
+            "banco": result.banco,
+            "conta": result.conta,
+            "confianca": result.confidence,
+            "ficticio": False,
+        }
+        try:
+            doc_res = supabase.schema("gestao_docs").from_("documento").insert(doc_data).execute()
+            doc_id = doc_res.data[0]["id"]
+        except Exception as exc:
+            logger.error("Scan: erro ao inserir '%s': %s", filename, exc)
+            try:
+                supabase.storage.from_(STORAGE_BUCKET).remove([storage_path])
+            except Exception:
+                pass
+            results.append({"nome_arquivo": filename, "erro": str(exc), "status": "erro"})
+            continue
+
+        results.append({
+            "id": doc_id,
+            "nome_arquivo": filename,
+            "tipo": result.doc_type,
+            "banco": result.banco,
+            "conta": result.conta,
+            "cnpj_extraido": result.cnpj,
+            "mes_referencia": result.mes_referencia,
+            "confidence": result.confidence,
+            "status": doc_status,
+            "empresa_sugerida_id": empresa_sugerida_id,
+        })
+
+    return {"arquivos": results}
+
+
+@router.post("/confirmar")
+async def confirmar_upload(body: ConfirmarRequest):
+    """Etapa 2: aplica mapeamento de empresa e executa detecção de duplicatas."""
+    supabase = get_supabase()
+    results = []
+
+    for item in body.mapeamentos:
+        doc_id = item.documento_id
+        empresa_destino_id = item.empresa_destino_id
+
+        try:
+            doc_res = (
+                supabase.schema("gestao_docs").from_("documento")
+                .select("*").eq("id", doc_id).single().execute()
+            )
+            doc = doc_res.data
+        except Exception as exc:
+            results.append({"id": doc_id, "status": "erro", "nome_arquivo": "", "erro": str(exc)})
+            continue
+
+        if not doc:
+            results.append({"id": doc_id, "status": "erro", "nome_arquivo": "", "erro": "Não encontrado"})
+            continue
+
+        tipo = doc.get("tipo")
+        banco = doc.get("banco")
+        conta = doc.get("conta")
+        mes_ref = doc.get("mes_referencia")
+        filename = doc.get("nome_arquivo", "")
+
+        # Não reconhecido: apenas move e coloca na fila
+        if doc.get("status") == "nao_reconhecido":
+            supabase.schema("gestao_docs").from_("documento").update(
+                {"empresa_id": empresa_destino_id}
+            ).eq("id", doc_id).execute()
+            try:
+                supabase.schema("gestao_docs").from_("fila_revisao").insert({"documento_id": doc_id}).execute()
+            except Exception:
+                pass
+            try:
+                supabase.schema("gestao_docs").from_("relatorio_erro").insert({
+                    "data": datetime.now().isoformat(),
+                    "empresa_id": empresa_destino_id,
+                    "documento_id": doc_id,
+                    "tipo_erro": "pendente_revisao",
+                }).execute()
+            except Exception:
+                pass
+            results.append({
+                "id": doc_id, "nome_arquivo": filename, "tipo": tipo,
+                "banco": banco, "conta": conta, "mes_referencia": mes_ref,
+                "status": "nao_reconhecido", "duplicata_de": None,
+                "empresa_id": empresa_destino_id,
+                "cnpj_extraido": doc.get("cnpj_extraido"),
+                "confidence": doc.get("confianca", 0),
+                "nome_sugerido": _nome_sugerido(tipo, mes_ref, banco, conta),
+            })
+            continue
+
+        # Checa duplicata na empresa destino
+        duplicata_de = None
+        final_status = "classificado"
+
+        if tipo and mes_ref:
+            try:
+                q = (
+                    supabase.schema("gestao_docs").from_("documento")
+                    .select("id,banco,conta")
+                    .eq("empresa_id", empresa_destino_id)
+                    .eq("tipo", tipo)
+                    .eq("mes_referencia", mes_ref)
+                    .not_.in_("status", ["duplicata", "aguardando_classificacao", "excluido"])
+                    .neq("id", doc_id)
+                    .is_("excluido_em", None)
+                    .execute()
+                )
+                for existing in (q.data or []):
+                    banco_esp = (banco or "").lower().strip()
+                    banco_doc = (existing.get("banco") or "").lower().strip()
+                    conta_esp = (conta or "").lower().replace("-", "").replace(".", "").strip()
+                    conta_doc = (existing.get("conta") or "").lower().replace("-", "").replace(".", "").strip()
+                    banco_match = (not banco_esp) or (banco_esp in banco_doc) or (banco_doc and banco_doc in banco_esp)
+                    if not conta_esp and not conta_doc:
+                        conta_match = True
+                    elif conta_esp and conta_doc:
+                        conta_match = (conta_esp in conta_doc) or (conta_doc in conta_esp)
+                    else:
+                        conta_match = not conta_esp
+                    if banco_match and conta_match:
+                        duplicata_de = existing["id"]
+                        final_status = "duplicata"
+                        break
+            except Exception as exc:
+                logger.warning("Confirmar: erro ao checar duplicata: %s", exc)
+
+        supabase.schema("gestao_docs").from_("documento").update({
+            "empresa_id": empresa_destino_id,
+            "status": final_status,
+        }).eq("id", doc_id).execute()
+
+        if final_status == "duplicata":
+            try:
+                supabase.schema("gestao_docs").from_("relatorio_erro").insert({
+                    "data": datetime.now().isoformat(),
+                    "empresa_id": empresa_destino_id,
+                    "documento_id": doc_id,
+                    "tipo_erro": "pasta_errada",
+                }).execute()
+            except Exception:
+                pass
+
+        results.append({
+            "id": doc_id, "nome_arquivo": filename, "tipo": tipo,
+            "banco": banco, "conta": conta, "mes_referencia": mes_ref,
+            "status": final_status, "duplicata_de": duplicata_de,
+            "empresa_id": empresa_destino_id,
+            "cnpj_extraido": doc.get("cnpj_extraido"),
+            "confidence": doc.get("confianca", 0),
+            "nome_sugerido": _nome_sugerido(tipo, mes_ref, banco, conta),
+        })
+
+    return {"resultados": results}

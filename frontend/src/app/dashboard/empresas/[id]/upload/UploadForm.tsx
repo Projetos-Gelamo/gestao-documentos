@@ -18,497 +18,635 @@ const TIPO_LABEL: Record<string, string> = {
   planilha_financeira: "Planilha Financeira",
   outros: "Outros",
 };
-
 const TIPOS_DOC = Object.entries(TIPO_LABEL).map(([value, label]) => ({ value, label }));
 
-type UploadResult = {
+type Step = "selecao" | "scan_loading" | "pre_classif" | "confirm_loading" | "resultados";
+
+type ScanArquivo = {
   id: string;
   nome_arquivo: string;
   tipo: string | null;
-  mes_referencia: string | null;
   banco: string | null;
   conta: string | null;
-  cnpj: string | null;
+  cnpj_extraido: string | null;
+  mes_referencia: string | null;
   confidence: number;
-  status: string;
-  na_fila_revisao: boolean;
-  nome_sugerido: string | null;
-  duplicata_de: string | null;
-  cnpj_empresa_esperado: string | null;
-  empresa_destino_id: string | null;
+  status: "aguardando_classificacao" | "nao_reconhecido" | "erro";
+  empresa_sugerida_id: string | null;
+  erro?: string;
 };
 
-type QueueItem = {
-  file: File;
-  status: "aguardando" | "processando" | "concluido" | "erro";
-  result?: UploadResult;
-  error?: string;
+type EmpresaOption = { id: string; nome: string; cnpj: string | null };
+
+type GrupoContas = {
+  key: string;
+  label: string;
+  tipo: string | null;
+  banco: string | null;
+  conta: string | null;
+  documentos: ScanArquivo[];
+  empresaId: string;
 };
+
+type ResultadoFinal = {
+  id: string;
+  nome_arquivo: string;
+  tipo: string | null;
+  banco: string | null;
+  conta: string | null;
+  mes_referencia: string | null;
+  status: string;
+  duplicata_de: string | null;
+  empresa_id: string;
+  cnpj_extraido: string | null;
+  confidence: number;
+  nome_sugerido?: string | null;
+};
+
+// ── Componente principal ───────────────────────────────────────────────────
 
 export default function UploadForm({ empresaId, empresaNome }: { empresaId: string; empresaNome: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [queue, setQueue] = useState<QueueItem[]>([]);
-  const [running, setRunning] = useState(false);
+  const [step, setStep] = useState<Step>("selecao");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [grupos, setGrupos] = useState<GrupoContas[]>([]);
+  const [naoReconhecidos, setNaoReconhecidos] = useState<ScanArquivo[]>([]);
+  const [comErro, setComErro] = useState<ScanArquivo[]>([]);
+  const [mapeamentoNaoRec, setMapeamentoNaoRec] = useState<Record<string, string>>({});
+  const [allEmpresas, setAllEmpresas] = useState<EmpresaOption[]>([]);
+  const [finalResults, setFinalResults] = useState<ResultadoFinal[]>([]);
+  const [previewState, setPreviewState] = useState<{ url: string; nome: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+  const [acoesFinal, setAcoesFinal] = useState<Record<string, string | null>>({});
+  const [scanErroGeral, setScanErroGeral] = useState<string | null>(null);
 
   function addFiles(files: FileList | File[]) {
-    const novos: QueueItem[] = Array.from(files).map((f) => ({
-      file: f,
-      status: "aguardando",
-    }));
-    setQueue((prev) => [...prev, ...novos]);
+    setSelectedFiles((prev) => [...prev, ...Array.from(files)]);
   }
 
-  async function processarFila(filaInicial: QueueItem[]) {
-    setRunning(true);
-    const fila = [...filaInicial];
-    for (let i = 0; i < fila.length; i++) {
-      if (fila[i].status !== "aguardando") continue;
-      setQueue((prev) =>
-        prev.map((item) => (item.file === fila[i].file ? { ...item, status: "processando" } : item))
-      );
-      try {
-        const form = new FormData();
-        form.append("empresa_id", empresaId);
-        form.append("file", fila[i].file);
-        const res = await fetch(`${API}/upload/`, { method: "POST", body: form });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Erro ao processar");
-        setQueue((prev) =>
-          prev.map((item) =>
-            item.file === fila[i].file ? { ...item, status: "concluido", result: data } : item
-          )
-        );
-      } catch (e: any) {
-        setQueue((prev) =>
-          prev.map((item) =>
-            item.file === fila[i].file ? { ...item, status: "erro", error: e.message } : item
-          )
-        );
+  async function handleScan() {
+    if (!selectedFiles.length) return;
+    setStep("scan_loading");
+    setScanErroGeral(null);
+
+    // Busca todas as empresas para o dropdown de pré-classificação
+    try {
+      const r = await fetch(`${API}/empresas`);
+      if (r.ok) {
+        const data = await r.json();
+        setAllEmpresas(data.map((e: any) => ({ id: e.id, nome: e.nome, cnpj: e.cnpj ?? null })));
+      }
+    } catch {}
+
+    const form = new FormData();
+    form.append("empresa_id", empresaId);
+    for (const f of selectedFiles) form.append("files", f);
+
+    try {
+      const res = await fetch(`${API}/upload/scan`, { method: "POST", body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Erro ao processar arquivos");
+      }
+      const data = await res.json();
+      const arquivos: ScanArquivo[] = data.arquivos || [];
+
+      // Separa: com erro de leitura, não reconhecidos, e normais
+      const erros: ScanArquivo[] = [];
+      const naoRec: ScanArquivo[] = [];
+      const naoRecMap: Record<string, string> = {};
+      const grupoMap = new Map<string, GrupoContas>();
+
+      for (const arq of arquivos) {
+        if (arq.status === "erro" || arq.erro) {
+          erros.push(arq);
+          continue;
+        }
+        if (arq.status === "nao_reconhecido") {
+          naoRec.push(arq);
+          naoRecMap[arq.id] = arq.empresa_sugerida_id ?? empresaId;
+          continue;
+        }
+
+        // Chave de agrupamento: banco+conta normalizado
+        const contaNorm = (arq.conta || "").toLowerCase().replace(/[^\d]/g, "");
+        const bancoNorm = (arq.banco || "").toLowerCase().trim();
+        const key = bancoNorm && contaNorm
+          ? `${bancoNorm}|${contaNorm}`
+          : `cnpj_${(arq.cnpj_extraido || "").replace(/\D/g, "") || arq.id}`;
+
+        if (!grupoMap.has(key)) {
+          const tLabel = TIPO_LABEL[arq.tipo ?? ""] ?? "Documento";
+          const label = arq.banco && arq.conta
+            ? `${tLabel} — ${arq.banco} CC ${arq.conta}`
+            : tLabel;
+          grupoMap.set(key, {
+            key, label,
+            tipo: arq.tipo,
+            banco: arq.banco,
+            conta: arq.conta,
+            documentos: [],
+            empresaId: arq.empresa_sugerida_id ?? empresaId,
+          });
+        }
+        grupoMap.get(key)!.documentos.push(arq);
+      }
+
+      setGrupos(Array.from(grupoMap.values()));
+      setNaoReconhecidos(naoRec);
+      setComErro(erros);
+      setMapeamentoNaoRec(naoRecMap);
+      setStep("pre_classif");
+    } catch (e: any) {
+      setScanErroGeral(e.message || "Erro desconhecido");
+      setStep("selecao");
+    }
+  }
+
+  async function handleConfirmar() {
+    setStep("confirm_loading");
+
+    const mapeamentos: { documento_id: string; empresa_destino_id: string }[] = [];
+    for (const grupo of grupos) {
+      for (const doc of grupo.documentos) {
+        mapeamentos.push({ documento_id: doc.id, empresa_destino_id: grupo.empresaId });
       }
     }
-    setRunning(false);
+    for (const doc of naoReconhecidos) {
+      mapeamentos.push({ documento_id: doc.id, empresa_destino_id: mapeamentoNaoRec[doc.id] ?? empresaId });
+    }
+
+    try {
+      const res = await fetch(`${API}/upload/confirmar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mapeamentos }),
+      });
+      const data = await res.json();
+      setFinalResults(data.resultados || []);
+      setStep("resultados");
+    } catch {
+      alert("Erro ao confirmar. Tente novamente.");
+      setStep("pre_classif");
+    }
   }
 
-  function iniciarUpload() {
-    const aguardando = queue.filter((q) => q.status === "aguardando");
-    if (!aguardando.length) return;
-    processarFila(queue);
+  async function handlePreview(docId: string) {
+    setPreviewLoading(docId);
+    try {
+      const r = await fetch(`${API}/documentos/${docId}/preview`);
+      const data = await r.json();
+      if (data.url) setPreviewState({ url: data.url, nome: data.nome_arquivo || "" });
+      else alert("Não foi possível carregar o arquivo.");
+    } catch {
+      alert("Erro ao carregar preview.");
+    } finally {
+      setPreviewLoading(null);
+    }
   }
 
-  function removerItem(file: File) {
-    setQueue((prev) => prev.filter((q) => q.file !== file));
+  function resetar() {
+    setSelectedFiles([]);
+    setGrupos([]);
+    setNaoReconhecidos([]);
+    setComErro([]);
+    setFinalResults([]);
+    setAcoesFinal({});
+    setScanErroGeral(null);
+    setStep("selecao");
   }
-
-  function limparConcluidos() {
-    setQueue((prev) => prev.filter((q) => q.status === "aguardando" || q.status === "processando"));
-  }
-
-  function atualizarStatusDoc(docId: string, novoStatus: string) {
-    setQueue((prev) =>
-      prev.map((q) =>
-        q.result?.id === docId ? { ...q, result: { ...q.result!, status: novoStatus } } : q
-      )
-    );
-  }
-
-  const total = queue.length;
-  const concluidos = queue.filter((q) => q.status === "concluido" || q.status === "erro").length;
-  const aguardando = queue.filter((q) => q.status === "aguardando").length;
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div style={{ maxWidth: 760 }}>
+      {/* Cabeçalho */}
       <div style={{ marginBottom: 20 }}>
         <Link href={`/dashboard/empresas/${empresaId}`} style={{ fontSize: 13, color: "#c4a030", textDecoration: "none" }}>
           ← {empresaNome}
         </Link>
         <h1 style={{ fontSize: 20, fontWeight: 700, marginTop: 8, color: "#0c1a2e" }}>Enviar documentos</h1>
         <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
-          Selecione um ou vários arquivos. PDF, imagem, XML, OFX, Excel. A IA lê e classifica automaticamente.
+          Selecione os arquivos — a IA extrai e classifica automaticamente.
         </p>
       </div>
 
-      {/* Drop zone */}
-      <div
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
-        }}
-        style={{
-          border: "2px dashed #c4a030",
-          borderRadius: 10,
-          padding: "28px 20px",
-          textAlign: "center",
-          cursor: "pointer",
-          background: "#faf8f4",
-        }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          style={{ display: "none" }}
-          accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.bmp,.xml,.ofx,.ofc,.xlsx,.xls,.csv"
-          onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
-        />
-        <p style={{ fontSize: 32, marginBottom: 8 }}>📂</p>
-        <p style={{ color: "#0c1a2e", fontWeight: 600, fontSize: 15 }}>Arraste arquivos aqui ou clique para selecionar</p>
-        <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>Vários arquivos de uma vez — PDF, Excel, XML, OFX, imagens</p>
-      </div>
+      {/* Indicador de etapas */}
+      <StepBar step={step} />
 
-      {/* Barra de ação */}
-      {queue.length > 0 && (
-        <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center" }}>
-          <button
-            onClick={iniciarUpload}
-            disabled={running || aguardando === 0}
+      {/* ── Etapa 1: Seleção ── */}
+      {(step === "selecao" || step === "scan_loading") && (
+        <div>
+          <div
+            onClick={() => step === "selecao" && inputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); if (step === "selecao" && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
             style={{
-              padding: "10px 24px",
-              background: running || aguardando === 0 ? "#e5e7eb" : "#0c1a2e",
-              color: running || aguardando === 0 ? "#9ca3af" : "#c4a030",
-              border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14,
-              cursor: running || aguardando === 0 ? "not-allowed" : "pointer",
+              border: "2px dashed #c4a030",
+              borderRadius: 10,
+              padding: "28px 20px",
+              textAlign: "center",
+              cursor: step === "selecao" ? "pointer" : "default",
+              background: "#faf8f4",
+              opacity: step === "scan_loading" ? 0.5 : 1,
             }}
           >
-            {running
-              ? `Processando ${concluidos + 1} de ${total}…`
-              : aguardando === 0
-              ? "Tudo processado"
-              : `Enviar ${aguardando} arquivo${aguardando > 1 ? "s" : ""}`}
-          </button>
-          {concluidos > 0 && !running && (
-            <button
-              onClick={limparConcluidos}
-              style={{ padding: "10px 16px", background: "transparent", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, color: "#6b7280", cursor: "pointer" }}
-            >
-              Limpar concluídos
-            </button>
-          )}
-          <span style={{ fontSize: 13, color: "#6b7280", marginLeft: "auto" }}>
-            {concluidos}/{total} concluído{concluidos !== 1 ? "s" : ""}
-          </span>
-        </div>
-      )}
-
-      {/* Barra de progresso */}
-      {total > 0 && (
-        <div style={{ marginTop: 10, height: 4, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${(concluidos / total) * 100}%`, background: "#c4a030", transition: "width .3s" }} />
-        </div>
-      )}
-
-      {/* Lista da fila */}
-      {queue.length > 0 && (
-        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-          {queue.map((item, idx) => (
-            <QueueRow
-              key={`${item.file.name}-${idx}`}
-              item={item}
-              index={idx + 1}
-              total={total}
-              empresaId={empresaId}
-              onRemove={() => removerItem(item.file)}
-              onActionComplete={atualizarStatusDoc}
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              style={{ display: "none" }}
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.bmp,.xml,.ofx,.ofc,.xlsx,.xls,.csv"
+              onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
             />
-          ))}
+            <p style={{ fontSize: 32, marginBottom: 8 }}>{step === "scan_loading" ? "⚙️" : "📂"}</p>
+            {step === "scan_loading" ? (
+              <>
+                <p style={{ color: "#0c1a2e", fontWeight: 600, fontSize: 15 }}>
+                  Analisando {selectedFiles.length} arquivo{selectedFiles.length !== 1 ? "s" : ""}…
+                </p>
+                <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
+                  A IA está lendo e extraindo as informações. Isso pode levar alguns segundos.
+                </p>
+              </>
+            ) : (
+              <>
+                <p style={{ color: "#0c1a2e", fontWeight: 600, fontSize: 15 }}>Arraste arquivos aqui ou clique para selecionar</p>
+                <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>Vários arquivos de uma vez — PDF, Excel, XML, OFX, imagens</p>
+              </>
+            )}
+          </div>
+
+          {scanErroGeral && (
+            <div style={{ marginTop: 12, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, fontSize: 13, color: "#b91c1c" }}>
+              ✗ {scanErroGeral}
+            </div>
+          )}
+
+          {selectedFiles.length > 0 && step === "selecao" && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 14, maxHeight: 200, overflowY: "auto" }}>
+                {selectedFiles.map((f, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#374151", padding: "4px 8px", background: "#f9fafb", borderRadius: 6 }}>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                    <span style={{ fontSize: 11, color: "#9ca3af", flexShrink: 0 }}>{(f.size / 1024).toFixed(0)} KB</span>
+                    <button onClick={() => setSelectedFiles((prev) => prev.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#9ca3af", cursor: "pointer", fontSize: 14 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={handleScan}
+                style={{ padding: "10px 28px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+              >
+                Analisar {selectedFiles.length} arquivo{selectedFiles.length !== 1 ? "s" : ""} →
+              </button>
+            </div>
+          )}
         </div>
+      )}
+
+      {/* ── Etapa 2: Pré-classificação ── */}
+      {step === "pre_classif" && (
+        <div>
+          <p style={{ fontSize: 13, color: "#374151", marginBottom: 20 }}>
+            A IA detectou as contas abaixo. Confirme a qual empresa cada uma pertence antes de salvar.
+          </p>
+
+          {/* Grupos de contas */}
+          {grupos.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0c1a2e", marginBottom: 10 }}>
+                Contas detectadas ({grupos.length})
+              </h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {grupos.map((grupo) => (
+                  <div key={grupo.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{grupo.label}</span>
+                      <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 8 }}>
+                        {grupo.documentos.length} arquivo{grupo.documentos.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                      <label style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>Pertence a:</label>
+                      <select
+                        value={grupo.empresaId}
+                        onChange={(e) => setGrupos((prev) => prev.map((g) => g.key === grupo.key ? { ...g, empresaId: e.target.value } : g))}
+                        style={{ fontSize: 12, padding: "5px 10px", border: "1px solid #d1d5db", borderRadius: 6, background: "white", minWidth: 200 }}
+                      >
+                        {allEmpresas.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.nome}{emp.cnpj ? ` — ${emp.cnpj}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Não reconhecidos */}
+          {naoReconhecidos.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#d97706", marginBottom: 10 }}>
+                ⚠ Não identificados ({naoReconhecidos.length})
+              </h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {naoReconhecidos.map((arq) => (
+                  <div key={arq.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "#fefce8", border: "1px solid #fde68a", borderRadius: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{arq.nome_arquivo}</span>
+                      <span style={{ fontSize: 11, color: "#d97706", marginLeft: 8 }}>A IA não conseguiu identificar</span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                      <label style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>Pertence a:</label>
+                      <select
+                        value={mapeamentoNaoRec[arq.id] ?? empresaId}
+                        onChange={(e) => setMapeamentoNaoRec((prev) => ({ ...prev, [arq.id]: e.target.value }))}
+                        style={{ fontSize: 12, padding: "5px 10px", border: "1px solid #fde68a", borderRadius: 6, background: "white", minWidth: 200 }}
+                      >
+                        {allEmpresas.map((emp) => (
+                          <option key={emp.id} value={emp.id}>{emp.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Arquivos com erro de leitura */}
+          {comErro.length > 0 && (
+            <div style={{ marginBottom: 24, padding: "12px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8 }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 6 }}>✗ Arquivos que falharam no upload:</p>
+              {comErro.map((arq, i) => (
+                <p key={i} style={{ fontSize: 12, color: "#7f1d1d" }}>{arq.nome_arquivo}: {arq.erro}</p>
+              ))}
+            </div>
+          )}
+
+          {grupos.length === 0 && naoReconhecidos.length === 0 && (
+            <div style={{ padding: "16px", background: "#f0fdf4", borderRadius: 8, fontSize: 13, color: "#16a34a" }}>
+              Nenhum arquivo processado com sucesso. Verifique os arquivos e tente novamente.
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button
+              onClick={handleConfirmar}
+              disabled={grupos.length === 0 && naoReconhecidos.length === 0}
+              style={{ padding: "10px 28px", background: "#c4a030", color: "#0c1a2e", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+            >
+              Confirmar classificação →
+            </button>
+            <button
+              onClick={resetar}
+              style={{ padding: "10px 18px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, cursor: "pointer" }}
+            >
+              ← Voltar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Etapa 2→3: Carregando confirmação ── */}
+      {step === "confirm_loading" && (
+        <div style={{ textAlign: "center", padding: 56 }}>
+          <p style={{ fontSize: 36 }}>⚙️</p>
+          <p style={{ fontSize: 15, fontWeight: 600, color: "#374151", marginTop: 12 }}>
+            Verificando duplicatas e salvando…
+          </p>
+          <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>Aguarde um momento.</p>
+        </div>
+      )}
+
+      {/* ── Etapa 3: Resultados ── */}
+      {step === "resultados" && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div>
+              <span style={{ fontSize: 13, color: "#16a34a", fontWeight: 600, marginRight: 12 }}>
+                ✓ {finalResults.filter((r) => r.status === "classificado").length} classificado{finalResults.filter((r) => r.status === "classificado").length !== 1 ? "s" : ""}
+              </span>
+              {finalResults.filter((r) => r.status === "duplicata").length > 0 && (
+                <span style={{ fontSize: 13, color: "#c2410c", fontWeight: 600, marginRight: 12 }}>
+                  ⚠ {finalResults.filter((r) => r.status === "duplicata").length} duplicata{finalResults.filter((r) => r.status === "duplicata").length !== 1 ? "s" : ""}
+                </span>
+              )}
+              {finalResults.filter((r) => r.status === "nao_reconhecido").length > 0 && (
+                <span style={{ fontSize: 13, color: "#d97706", fontWeight: 600 }}>
+                  ? {finalResults.filter((r) => r.status === "nao_reconhecido").length} não identificado{finalResults.filter((r) => r.status === "nao_reconhecido").length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            <button onClick={resetar} style={{ padding: "7px 16px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              + Enviar mais arquivos
+            </button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {finalResults.map((resultado) => (
+              <ResultadoRow
+                key={resultado.id}
+                resultado={resultado}
+                empresaId={empresaId}
+                acaoFinalizada={acoesFinal[resultado.id] ?? null}
+                onAcaoFinalizada={(msg) => setAcoesFinal((prev) => ({ ...prev, [resultado.id]: msg }))}
+                onPreview={() => handlePreview(resultado.id)}
+                previewLoading={previewLoading === resultado.id}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de preview */}
+      {previewState && (
+        <PreviewModal url={previewState.url} nome={previewState.nome} onClose={() => setPreviewState(null)} />
       )}
     </div>
   );
 }
 
-function QueueRow({
-  item,
-  index,
-  total,
+// ── Indicador de etapas ────────────────────────────────────────────────────
+
+function StepBar({ step }: { step: Step }) {
+  const etapas = [
+    { key: "selecao", label: "1 · Selecionar" },
+    { key: "pre_classif", label: "2 · Classificar contas" },
+    { key: "resultados", label: "3 · Resultado" },
+  ];
+  const stepIdx = step === "selecao" || step === "scan_loading" ? 0
+    : step === "pre_classif" || step === "confirm_loading" ? 1
+    : 2;
+
+  return (
+    <div style={{ display: "flex", gap: 0, marginBottom: 28, alignItems: "center" }}>
+      {etapas.map((e, i) => {
+        const done = i < stepIdx;
+        const active = i === stepIdx;
+        return (
+          <div key={e.key} style={{ display: "flex", alignItems: "center" }}>
+            <span style={{
+              fontSize: 12,
+              fontWeight: active ? 700 : 500,
+              color: active ? "#c4a030" : done ? "#16a34a" : "#9ca3af",
+              padding: "4px 10px",
+              borderRadius: 20,
+              background: active ? "rgba(196,160,48,0.12)" : "transparent",
+            }}>
+              {done ? "✓ " : ""}{e.label}
+            </span>
+            {i < etapas.length - 1 && <span style={{ color: "#d1d5db", margin: "0 4px", fontSize: 12 }}>→</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Linha de resultado ─────────────────────────────────────────────────────
+
+function ResultadoRow({
+  resultado,
   empresaId,
-  onRemove,
-  onActionComplete,
+  acaoFinalizada,
+  onAcaoFinalizada,
+  onPreview,
+  previewLoading,
 }: {
-  item: QueueItem;
-  index: number;
-  total: number;
+  resultado: ResultadoFinal;
   empresaId: string;
-  onRemove: () => void;
-  onActionComplete: (docId: string, novoStatus: string) => void;
+  acaoFinalizada: string | null;
+  onAcaoFinalizada: (msg: string) => void;
+  onPreview: () => void;
+  previewLoading: boolean;
 }) {
-  const { file, status, result, error } = item;
   const [expanded, setExpanded] = useState(false);
   const [acaoEmAndamento, setAcaoEmAndamento] = useState<string | null>(null);
-  const [acaoFinalizada, setAcaoFinalizada] = useState<string | null>(null);
   const [classificandoManual, setClassificandoManual] = useState(false);
-  const [manualForm, setManualForm] = useState({
-    tipo: "extrato_bancario",
-    mes_referencia: "",
-    banco: "",
-    conta: "",
-  });
+  const [manualForm, setManualForm] = useState({ tipo: "extrato_bancario", mes_referencia: "", banco: "", conta: "" });
 
-  const statusConfig = {
-    aguardando:  { icon: "⏳", color: "#9ca3af", bg: "#f9fafb",  label: "Aguardando" },
-    processando: { icon: "⚙️", color: "#2563eb", bg: "#eff6ff",  label: "Processando…" },
-    concluido:   {
-      icon:  result?.status === "empresa_errada" ? "🚨"
-           : result?.status === "duplicata"      ? "⚠"
-           : result?.status === "nao_reconhecido"? "⚠"
-           : result?.status === "excluido"       ? "✕"
-           : "✓",
-      color: result?.status === "empresa_errada" ? "#b91c1c"
-           : result?.status === "duplicata"      ? "#c2410c"
-           : result?.status === "nao_reconhecido"? "#d97706"
-           : result?.status === "excluido"       ? "#9ca3af"
-           : "#16a34a",
-      bg:    result?.status === "empresa_errada" ? "#fef2f2"
-           : result?.status === "duplicata"      ? "#fff7ed"
-           : result?.status === "nao_reconhecido"? "#fefce8"
-           : result?.status === "excluido"       ? "#f9fafb"
-           : "#f0fdf4",
-      label: result?.status === "empresa_errada" ? "Empresa errada"
-           : result?.status === "duplicata"      ? "Duplicata"
-           : result?.status === "nao_reconhecido"? "Não identificado"
-           : result?.status === "excluido"       ? "Excluído"
-           : "Classificado",
-    },
-    erro: { icon: "✗", color: "#b91c1c", bg: "#fef2f2", label: "Erro" },
-  }[status];
+  const { status } = resultado;
+  const cfg = {
+    classificado:    { icon: "✓", color: "#16a34a", bg: "#f0fdf4",  label: "Classificado" },
+    duplicata:       { icon: "⚠", color: "#c2410c", bg: "#fff7ed",  label: "Duplicata" },
+    nao_reconhecido: { icon: "?", color: "#d97706", bg: "#fefce8",  label: "Não identificado" },
+    erro:            { icon: "✗", color: "#b91c1c", bg: "#fef2f2",  label: "Erro" },
+  }[status] ?? { icon: "·", color: "#6b7280", bg: "#f9fafb", label: status };
 
   async function logAcao(tipo_acao: string, detalhes?: object) {
     try {
       await fetch(`${API}/acoes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ empresa_id: empresaId, documento_id: result?.id, tipo_acao, detalhes }),
+        body: JSON.stringify({ empresa_id: empresaId, documento_id: resultado.id, tipo_acao, detalhes }),
       });
     } catch {}
   }
 
   async function handleSubstituir() {
-    if (!result?.id || !result?.duplicata_de) return;
+    if (!resultado.duplicata_de) return;
     setAcaoEmAndamento("substituir");
     try {
-      const r = await fetch(`${API}/documentos/${result.id}/substituir/${result.duplicata_de}`, { method: "POST" });
+      const r = await fetch(`${API}/documentos/${resultado.id}/substituir/${resultado.duplicata_de}`, { method: "POST" });
       if (r.ok) {
-        await logAcao("substituir_duplicata", { original_id: result.duplicata_de });
-        setAcaoFinalizada("Original substituído — documento classificado");
-        onActionComplete(result.id, "classificado");
-      } else {
-        alert("Erro ao substituir. Tente novamente.");
-      }
-    } catch {
-      alert("Erro de conexão ao substituir.");
-    } finally {
-      setAcaoEmAndamento(null);
-    }
+        await logAcao("substituir_duplicata", { original_id: resultado.duplicata_de });
+        onAcaoFinalizada("Original substituído — documento classificado");
+      } else alert("Erro ao substituir.");
+    } finally { setAcaoEmAndamento(null); }
   }
 
-  async function handleExcluirDuplicata() {
-    if (!result?.id) return;
+  async function handleExcluir() {
     setAcaoEmAndamento("excluir");
     try {
-      const r = await fetch(`${API}/documentos/${result.id}`, { method: "DELETE" });
+      const r = await fetch(`${API}/documentos/${resultado.id}`, { method: "DELETE" });
       if (r.ok) {
         await logAcao("excluir_duplicata");
-        setAcaoFinalizada("Arquivo excluído");
-        onActionComplete(result.id, "excluido");
-      } else {
-        alert("Erro ao excluir. Tente novamente.");
-      }
-    } catch {
-      alert("Erro de conexão ao excluir.");
-    } finally {
-      setAcaoEmAndamento(null);
-    }
-  }
-
-  async function handleMoverEmpresa() {
-    if (!result?.id) return;
-    let destId = result.empresa_destino_id;
-    if (!destId && result.cnpj) {
-      const normaliza = (c: string) => c.replace(/\D/g, "");
-      const cnpjDoc = normaliza(result.cnpj);
-      try {
-        const r = await fetch(`${API}/empresas`);
-        const empresas = r.ok ? await r.json() : [];
-        const dest = empresas.find((e: any) => normaliza(e.cnpj || "") === cnpjDoc);
-        destId = dest?.id ?? null;
-      } catch {}
-    }
-    if (!destId) {
-      alert("Não foi possível encontrar a empresa destino automaticamente. Verifique se o CNPJ está cadastrado no sistema.");
-      return;
-    }
-    setAcaoEmAndamento("mover");
-    try {
-      const r = await fetch(`${API}/documentos/${result.id}/mover-empresa/${destId}`, { method: "POST" });
-      if (r.ok) {
-        await logAcao("mover_empresa", { empresa_destino_id: destId });
-        setAcaoFinalizada("Movido para a empresa correta");
-        onActionComplete(result.id, "movido");
-      } else {
-        alert("Erro ao mover. Tente novamente.");
-      }
-    } catch {
-      alert("Erro de conexão ao mover.");
-    } finally {
-      setAcaoEmAndamento(null);
-    }
+        onAcaoFinalizada("Arquivo excluído");
+      } else alert("Erro ao excluir.");
+    } finally { setAcaoEmAndamento(null); }
   }
 
   async function handleClassificarManual() {
-    if (!result?.id) return;
     if (!manualForm.tipo || !manualForm.mes_referencia) {
-      alert("Preencha o tipo e o mês de referência (formato YYYY-MM).");
+      alert("Preencha tipo e mês de referência (YYYY-MM).");
       return;
     }
     setAcaoEmAndamento("classificar");
     try {
-      const body = {
-        tipo: manualForm.tipo,
-        mes_referencia: manualForm.mes_referencia,
-        banco: manualForm.banco || null,
-        conta: manualForm.conta || null,
-      };
-      const r = await fetch(`${API}/documentos/${result.id}/classificar-manual`, {
+      const r = await fetch(`${API}/documentos/${resultado.id}/classificar-manual`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...manualForm, banco: manualForm.banco || null, conta: manualForm.conta || null }),
       });
       if (r.ok) {
-        await logAcao("classificar_manual", body);
-        setAcaoFinalizada("Classificado manualmente");
+        await logAcao("classificar_manual", manualForm);
+        onAcaoFinalizada("Classificado manualmente");
         setClassificandoManual(false);
-        onActionComplete(result.id, "classificado");
-      } else {
-        alert("Erro ao classificar. Tente novamente.");
-      }
-    } catch {
-      alert("Erro de conexão ao classificar.");
-    } finally {
-      setAcaoEmAndamento(null);
-    }
+      } else alert("Erro ao classificar.");
+    } finally { setAcaoEmAndamento(null); }
   }
 
-  const temAcao = status === "concluido" && result &&
-    ["duplicata", "empresa_errada", "nao_reconhecido"].includes(result.status);
+  const temAcao = ["duplicata", "nao_reconhecido"].includes(status);
 
   return (
-    <div style={{
-      background: statusConfig.bg,
-      border: `1px solid ${
-        status === "concluido" && result?.status === "empresa_errada" ? "#fca5a5"
-        : status === "concluido" && result?.status === "duplicata" ? "#fed7aa"
-        : "#e5e7eb"
-      }`,
-      borderRadius: 8,
-      padding: "10px 14px",
-    }}>
+    <div style={{ background: cfg.bg, border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 11, color: "#9ca3af", width: 32, flexShrink: 0, textAlign: "right" }}>{index}/{total}</span>
-        <span style={{ fontSize: status === "processando" ? 16 : 14, color: statusConfig.color, flexShrink: 0 }}>
-          {statusConfig.icon}
-        </span>
+        <span style={{ fontSize: 14, color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
         <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {file.name}
+          {resultado.nome_arquivo}
         </span>
-        <span style={{ fontSize: 12, color: statusConfig.color, fontWeight: 600, flexShrink: 0 }}>
-          {statusConfig.label}
-        </span>
-        {status === "concluido" && result && (
+        <span style={{ fontSize: 12, color: cfg.color, fontWeight: 600, flexShrink: 0 }}>{cfg.label}</span>
+
+        {/* Botão ver arquivo — para duplicata e nao_reconhecido */}
+        {temAcao && !acaoFinalizada && (
           <button
-            onClick={() => setExpanded((v) => !v)}
-            style={{ fontSize: 11, color: "#6b7280", background: "transparent", border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 8px", cursor: "pointer" }}
+            onClick={onPreview}
+            disabled={previewLoading}
+            style={{ padding: "3px 10px", background: "white", color: "#2563eb", border: "1px solid #2563eb", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: previewLoading ? "not-allowed" : "pointer", opacity: previewLoading ? 0.6 : 1, flexShrink: 0 }}
           >
-            {expanded ? "▲" : "▼"}
+            {previewLoading ? "..." : "👁 Ver arquivo"}
           </button>
         )}
-        {status === "aguardando" && (
-          <button onClick={onRemove} style={{ fontSize: 13, color: "#9ca3af", background: "transparent", border: "none", cursor: "pointer", padding: "0 4px" }}>✕</button>
-        )}
+
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{ fontSize: 11, color: "#6b7280", background: "transparent", border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 8px", cursor: "pointer", flexShrink: 0 }}
+        >
+          {expanded ? "▲" : "▼"}
+        </button>
       </div>
 
-      {/* Detalhe + ações */}
-      {expanded && result && (
+      {expanded && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb" }}>
-          {result.status === "empresa_errada" && (
-            <div style={{ background: "#fee2e2", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#7f1d1d", marginBottom: 8 }}>
-              <strong>CNPJ no documento:</strong> {result.cnpj}<br />
-              <strong>CNPJ desta empresa:</strong> {result.cnpj_empresa_esperado}<br />
-              Este documento pertence a outra empresa cadastrada.
-            </div>
-          )}
-          {result.status === "duplicata" && (
-            <div style={{ background: "#ffedd5", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#9a3412", marginBottom: 8 }}>
-              Já existe um documento do mesmo tipo, banco e mês registrado.
-            </div>
-          )}
-          {result.status === "nao_reconhecido" && (
-            <div style={{ background: "#fefce8", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#713f12", marginBottom: 8 }}>
-              A IA não conseguiu identificar o tipo deste documento. Classifique manualmente abaixo.
-            </div>
-          )}
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 24px", marginBottom: temAcao ? 10 : 0 }}>
-            {result.tipo && <Detail label="Tipo" value={TIPO_LABEL[result.tipo] ?? result.tipo} />}
-            {result.banco && <Detail label="Banco" value={result.banco} />}
-            {result.conta && <Detail label="Conta" value={result.conta} />}
-            {result.mes_referencia && <Detail label="Mês ref." value={_mesPtBR(result.mes_referencia)} />}
-            <Detail label="Confiança" value={`${(result.confidence * 100).toFixed(0)}%`} />
-            {result.nome_sugerido && result.status !== "empresa_errada" && (
-              <Detail label="Nome sugerido" value={result.nome_sugerido} highlight />
-            )}
+          {/* Info */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px", marginBottom: 10 }}>
+            {resultado.tipo && <Detail label="Tipo" value={TIPO_LABEL[resultado.tipo] ?? resultado.tipo} />}
+            {resultado.banco && <Detail label="Banco" value={resultado.banco} />}
+            {resultado.conta && <Detail label="Conta" value={resultado.conta} />}
+            {resultado.mes_referencia && <Detail label="Mês" value={_mesPtBR(resultado.mes_referencia)} />}
+            {resultado.nome_sugerido && <Detail label="Nome sugerido" value={resultado.nome_sugerido} highlight />}
           </div>
 
           {/* Ações */}
           {acaoFinalizada ? (
-            <div style={{ padding: "6px 10px", background: "#f0fdf4", borderRadius: 6, fontSize: 12, color: "#16a34a", fontWeight: 600 }}>
-              ✓ {acaoFinalizada}
-            </div>
+            <div style={{ padding: "6px 10px", background: "#f0fdf4", borderRadius: 6, fontSize: 12, color: "#16a34a", fontWeight: 600 }}>✓ {acaoFinalizada}</div>
           ) : (
             <>
-              {result.status === "duplicata" && result.duplicata_de && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <AcaoBtn
-                    onClick={handleSubstituir}
-                    loading={acaoEmAndamento === "substituir"}
-                    label="↩ Substituir original"
-                    color="#16a34a"
-                  />
-                  <AcaoBtn
-                    onClick={handleExcluirDuplicata}
-                    loading={acaoEmAndamento === "excluir"}
-                    label="✕ Excluir este"
-                    color="#b91c1c"
-                  />
-                </div>
-              )}
-              {result.status === "empresa_errada" && (
+              {status === "duplicata" && resultado.duplicata_de && (
                 <div style={{ display: "flex", gap: 8 }}>
-                  <AcaoBtn
-                    onClick={handleMoverEmpresa}
-                    loading={acaoEmAndamento === "mover"}
-                    label="→ Mover para empresa certa"
-                    color="#2563eb"
-                  />
+                  <AcaoBtn onClick={handleSubstituir} loading={acaoEmAndamento === "substituir"} label="↩ Substituir original" color="#16a34a" />
+                  <AcaoBtn onClick={handleExcluir} loading={acaoEmAndamento === "excluir"} label="✕ Excluir este" color="#b91c1c" />
                 </div>
               )}
-              {result.status === "nao_reconhecido" && (
+              {status === "nao_reconhecido" && (
                 <div>
                   {!classificandoManual ? (
-                    <AcaoBtn
-                      onClick={() => setClassificandoManual(true)}
-                      loading={false}
-                      label="✏ Classificar agora"
-                      color="#d97706"
-                    />
+                    <AcaoBtn onClick={() => setClassificandoManual(true)} loading={false} label="✏ Classificar agora" color="#d97706" />
                   ) : (
-                    <ClassificacaoForm
-                      form={manualForm}
-                      onChange={setManualForm}
-                      onSubmit={handleClassificarManual}
-                      onCancel={() => setClassificandoManual(false)}
-                      loading={acaoEmAndamento === "classificar"}
-                    />
+                    <ClassificacaoForm form={manualForm} onChange={setManualForm} onSubmit={handleClassificarManual} onCancel={() => setClassificandoManual(false)} loading={acaoEmAndamento === "classificar"} />
                   )}
                 </div>
               )}
@@ -516,43 +654,55 @@ function QueueRow({
           )}
         </div>
       )}
-
-      {status === "erro" && error && (
-        <p style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>{error}</p>
-      )}
     </div>
   );
 }
 
+// ── Modal de preview ──────────────────────────────────────────────────────
+
+function PreviewModal({ url, nome, onClose }: { url: string; nome: string; onClose: () => void }) {
+  const ext = nome.split(".").pop()?.toLowerCase() || "";
+  const isImage = ["jpg", "jpeg", "png", "webp", "tiff", "bmp", "gif"].includes(ext);
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", flexDirection: "column" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 20px", background: "rgba(0,0,0,0.5)", flexShrink: 0 }}>
+        <span style={{ color: "white", fontSize: 13, fontWeight: 500, maxWidth: "calc(100% - 120px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nome}</span>
+        <div style={{ display: "flex", gap: 10 }}>
+          <a href={url} target="_blank" rel="noopener noreferrer" style={{ padding: "5px 14px", background: "rgba(196,160,48,0.2)", color: "#c4a030", border: "1px solid #c4a030", borderRadius: 6, fontSize: 12, textDecoration: "none" }}>
+            Abrir em nova aba
+          </a>
+          <button onClick={onClose} style={{ padding: "5px 14px", background: "white", color: "#0c1a2e", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+            ✕ Fechar
+          </button>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 16, overflowY: "auto" }}>
+        {isImage ? (
+          <img src={url} alt={nome} style={{ maxWidth: "100%", maxHeight: "90vh", borderRadius: 6, boxShadow: "0 4px 24px rgba(0,0,0,0.5)" }} />
+        ) : (
+          <iframe src={url} title={nome} style={{ width: "100%", maxWidth: 900, height: "85vh", border: "none", borderRadius: 6, background: "white" }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-componentes auxiliares ─────────────────────────────────────────────
+
 function AcaoBtn({ onClick, loading, label, color }: { onClick: () => void; loading: boolean; label: string; color: string }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={loading}
-      style={{
-        padding: "5px 12px",
-        background: "white",
-        color,
-        border: `1px solid ${color}`,
-        borderRadius: 6,
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: loading ? "not-allowed" : "pointer",
-        opacity: loading ? 0.6 : 1,
-      }}
-    >
+    <button onClick={onClick} disabled={loading}
+      style={{ padding: "5px 12px", background: "white", color, border: `1px solid ${color}`, borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1 }}>
       {loading ? "Aguarde..." : label}
     </button>
   );
 }
 
-function ClassificacaoForm({
-  form,
-  onChange,
-  onSubmit,
-  onCancel,
-  loading,
-}: {
+function ClassificacaoForm({ form, onChange, onSubmit, onCancel, loading }: {
   form: { tipo: string; mes_referencia: string; banco: string; conta: string };
   onChange: (f: any) => void;
   onSubmit: () => void;
@@ -561,7 +711,6 @@ function ClassificacaoForm({
 }) {
   return (
     <div style={{ marginTop: 8, padding: 12, background: "#faf8f4", border: "1px solid #e5e7eb", borderRadius: 8 }}>
-      <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "#374151" }}>Classificar manualmente:</p>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
         <div>
           <label style={lbl}>Tipo</label>
@@ -571,40 +720,20 @@ function ClassificacaoForm({
         </div>
         <div>
           <label style={lbl}>Mês referência (YYYY-MM)</label>
-          <input
-            placeholder="Ex: 2025-01"
-            value={form.mes_referencia}
-            onChange={(e) => onChange({ ...form, mes_referencia: e.target.value })}
-            style={inp}
-          />
+          <input placeholder="Ex: 2025-01" value={form.mes_referencia} onChange={(e) => onChange({ ...form, mes_referencia: e.target.value })} style={inp} />
         </div>
         {form.tipo === "extrato_bancario" && (
           <>
-            <div>
-              <label style={lbl}>Banco (opcional)</label>
-              <input placeholder="Ex: Itaú" value={form.banco} onChange={(e) => onChange({ ...form, banco: e.target.value })} style={inp} />
-            </div>
-            <div>
-              <label style={lbl}>Conta (opcional)</label>
-              <input placeholder="Ex: 12345-6" value={form.conta} onChange={(e) => onChange({ ...form, conta: e.target.value })} style={inp} />
-            </div>
+            <div><label style={lbl}>Banco</label><input placeholder="Ex: Itaú" value={form.banco} onChange={(e) => onChange({ ...form, banco: e.target.value })} style={inp} /></div>
+            <div><label style={lbl}>Conta</label><input placeholder="Ex: 12345-6" value={form.conta} onChange={(e) => onChange({ ...form, conta: e.target.value })} style={inp} /></div>
           </>
         )}
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button
-          onClick={onSubmit}
-          disabled={loading}
-          style={{ padding: "6px 14px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer" }}
-        >
-          {loading ? "Salvando..." : "Salvar classificação"}
+        <button onClick={onSubmit} disabled={loading} style={{ padding: "6px 14px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer" }}>
+          {loading ? "Salvando..." : "Salvar"}
         </button>
-        <button
-          onClick={onCancel}
-          style={{ padding: "6px 12px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 12, cursor: "pointer" }}
-        >
-          Cancelar
-        </button>
+        <button onClick={onCancel} style={{ padding: "6px 12px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>Cancelar</button>
       </div>
     </div>
   );
@@ -627,7 +756,6 @@ const _MESES: Record<string, string> = {
   "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
   "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro",
 };
-
 function _mesPtBR(mes: string) {
   if (mes.length !== 7) return mes;
   const [ano, m] = mes.split("-");

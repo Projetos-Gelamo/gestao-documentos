@@ -213,3 +213,36 @@ async def classificar_manual(documento_id: UUID, update: DocumentoUpdate):
         pass
 
     return res.data[0]
+
+
+@router.get("/{documento_id}/preview")
+def preview_documento(documento_id: UUID):
+    """Retorna URL assinada (5 min) para visualizar o arquivo no Storage."""
+    supabase = get_supabase()
+    try:
+        doc = (
+            supabase.schema("gestao_docs").from_("documento")
+            .select("storage_path,nome_arquivo")
+            .eq("id", str(documento_id))
+            .single()
+            .execute()
+        )
+    except Exception:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    if not doc.data or not doc.data.get("storage_path"):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+    try:
+        result = supabase.storage.from_(STORAGE_BUCKET).create_signed_url(
+            doc.data["storage_path"], 300
+        )
+        url = result.get("signedURL") or result.get("signed_url", "")
+        if not url:
+            raise HTTPException(status_code=500, detail="Não foi possível gerar URL de preview")
+        return {"url": url, "nome_arquivo": doc.data.get("nome_arquivo", "")}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Erro ao criar signed URL: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar preview: {exc}")
