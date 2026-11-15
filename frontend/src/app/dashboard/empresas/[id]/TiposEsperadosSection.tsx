@@ -295,7 +295,7 @@ export default function TiposEsperadosSection({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
                 <label style={labelStyle}>Banco</label>
-                <input placeholder="Ex: Itaú" value={form.banco} onChange={(e) => setForm({ ...form, banco: e.target.value })} style={inputStyle} />
+                <input placeholder="Ex: Banco ABC" value={form.banco} onChange={(e) => setForm({ ...form, banco: e.target.value })} style={inputStyle} />
               </div>
               <div>
                 <label style={labelStyle}>Conta corrente</label>

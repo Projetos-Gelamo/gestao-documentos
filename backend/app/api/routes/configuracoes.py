@@ -545,7 +545,7 @@ def _make_xlsx(headers: list[str], example_row: list) -> bytes:
 @router.get("/templates/contas-bancarias.xlsx")
 def template_contas():
     headers = ["Banco", "Agência", "Conta", "Tipo", "CNPJ"]
-    example = ["Banco do Brasil", "0001-9", "12345-6", "corrente", "00.000.000/0001-00"]
+    example = ["Banco Exemplo", "0001-9", "12345-6", "corrente", "00.000.000/0001-00"]
     content = _make_xlsx(headers, example)
     return StreamingResponse(
         io.BytesIO(content),
@@ -559,10 +559,10 @@ def template_documentos():
     headers = ["Tipo", "Banco", "Agência", "Conta", "Descrição", "Frequência"]
     example = [
         "extrato_bancario",
-        "Banco do Brasil",
+        "Banco Exemplo",
         "0001-9",
         "12345-6",
-        "Extrato conta corrente BB",
+        "Extrato conta corrente Banco Exemplo",
         "mensal",
     ]
     content = _make_xlsx(headers, example)

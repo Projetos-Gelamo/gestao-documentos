@@ -229,15 +229,15 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
             <Field label="Banco *">
               <input value={form.banco ?? ""} onChange={(e) => setForm({ ...form, banco: e.target.value })}
-                placeholder="ex: Itaú" style={inputStyle} />
+                placeholder="ex: Banco ABC" style={inputStyle} />
             </Field>
             <Field label="Agência">
               <input value={form.agencia ?? ""} onChange={(e) => setForm({ ...form, agencia: e.target.value })}
-                placeholder="ex: 0143" style={inputStyle} />
+                placeholder="ex: 0001" style={inputStyle} />
             </Field>
             <Field label="Conta *">
               <input value={form.conta ?? ""} onChange={(e) => setForm({ ...form, conta: e.target.value })}
-                placeholder="ex: 11810-7" style={inputStyle} />
+                placeholder="ex: 12345-6" style={inputStyle} />
             </Field>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
@@ -250,7 +250,7 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
             </Field>
             <Field label="CNPJ (se diferente da empresa)">
               <input value={form.cnpj ?? ""} onChange={(e) => setForm({ ...form, cnpj: e.target.value })}
-                placeholder="ex: 02.221.511/0002-40" style={inputStyle} />
+                placeholder="ex: 00.000.000/0001-00" style={inputStyle} />
             </Field>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -419,7 +419,7 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
             <Field label="Descrição *">
               <input value={form.descricao ?? ""} onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-                placeholder="ex: Extrato Itaú CC 11810-7" style={inputStyle} />
+                placeholder="ex: Extrato Conta Corrente ABC" style={inputStyle} />
             </Field>
             <Field label="Conta vinculada (opcional)">
               <select value={form.conta_bancaria_id ?? ""} onChange={(e) => setForm({ ...form, conta_bancaria_id: e.target.value || null })} style={inputStyle}>

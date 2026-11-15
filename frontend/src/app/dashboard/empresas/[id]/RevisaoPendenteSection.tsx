@@ -319,7 +319,7 @@ function ClassificacaoForm({
           <>
             <div>
               <label style={lbl}>Banco (opcional)</label>
-              <input placeholder="Ex: Itaú" value={form.banco} onChange={(e) => onChange({ ...form, banco: e.target.value })} style={inp} />
+              <input placeholder="Ex: Banco ABC" value={form.banco} onChange={(e) => onChange({ ...form, banco: e.target.value })} style={inp} />
             </div>
             <div>
               <label style={lbl}>Conta (opcional)</label>
