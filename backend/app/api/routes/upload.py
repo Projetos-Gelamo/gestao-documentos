@@ -306,6 +306,24 @@ async def scan_upload(
     except Exception:
         pass
 
+    # Lookup global: banco+conta → (empresa_id, empresa_nome) para contas de OUTRAS empresas
+    conta_empresa_map: dict[str, tuple[str, str | None]] = {}
+    try:
+        cb_res = (
+            supabase.schema("gestao_docs").from_("conta_bancaria")
+            .select("banco,conta,empresa_id,empresa:empresa_id(nome)")
+            .neq("empresa_id", empresa_id)
+            .execute()
+        )
+        for cb in (cb_res.data or []):
+            b = (cb.get("banco") or "").lower().strip()
+            c = re.sub(r"[^\d]", "", cb.get("conta") or "")
+            if b and c:
+                emp = cb.get("empresa") or {}
+                conta_empresa_map[f"{b}|{c}"] = (cb["empresa_id"], emp.get("nome"))
+    except Exception:
+        pass
+
     results = []
 
     for file in files:
@@ -344,6 +362,14 @@ async def scan_upload(
                     empresa_sugerida_id = e["id"]
                     empresa_sugerida_nome = e.get("nome")
                     break
+
+        # Se CNPJ não identificou outra empresa, tenta pelo banco+conta cadastrado
+        if empresa_sugerida_id == empresa_id and result.banco and result.conta:
+            b = result.banco.lower().strip()
+            c = re.sub(r"[^\d]", "", result.conta)
+            match = conta_empresa_map.get(f"{b}|{c}")
+            if match:
+                empresa_sugerida_id, empresa_sugerida_nome = match
 
         # Conta é nova para esta empresa?
         conta_nova = True
