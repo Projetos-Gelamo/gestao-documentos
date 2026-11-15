@@ -50,10 +50,12 @@ type ContaCard = {
   key: string;
   cnpj: string | null;
   empresaNome: string | null;
+  empresaSugeridaId: string | null; // id da empresa detectada pelo CNPJ (diferente da atual)
   banco: string | null;
   conta: string | null;
   arquivos: ScanArquivo[];
   pertence: boolean;
+  moverDireto: boolean; // enviar diretamente para a empresa sugerida
   oculta: boolean;
 };
 
@@ -177,16 +179,20 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       const key = rawKey === "::" ? `unknown_${arq.id}` : rawKey;
 
       if (!map.has(key)) {
-        // Pertence por padrão se CNPJ bate com a empresa ou não foi identificado
         const pertence = !arq.empresa_sugerida_id || arq.empresa_sugerida_id === empId;
+        // empresaSugeridaId só preenchido quando aponta para outra empresa (não a atual)
+        const empresaSugeridaId = arq.empresa_sugerida_id && arq.empresa_sugerida_id !== empId
+          ? arq.empresa_sugerida_id : null;
         map.set(key, {
           key,
           cnpj: arq.cnpj_extraido,
           empresaNome: arq.empresa_sugerida_nome,
+          empresaSugeridaId,
           banco: arq.banco,
           conta: arq.conta,
           arquivos: [],
           pertence,
+          moverDireto: false,
           oculta: false,
         });
       }
@@ -199,7 +205,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
   function goToArquivosRevisao() {
     const pertenceArquivos = contas
-      .filter((c) => c.pertence && !c.oculta)
+      .filter((c) => c.pertence && !c.oculta && !c.moverDireto)
       .flatMap((c) => c.arquivos)
       .filter((a) => !!a.id);
 
@@ -257,18 +263,43 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     }
 
     // 2. Monta mapeamentos
+    // 1a. Mover direto para empresa sugerida (antes do confirmar principal)
+    const moverDiretoResults: ResultadoFinal[] = [];
+    for (const conta of contas.filter((c) => c.moverDireto && c.empresaSugeridaId)) {
+      for (const arq of conta.arquivos.filter((a) => !!a.id)) {
+        try {
+          await fetch(`${API}/documentos/${arq.id}/mover-empresa/${conta.empresaSugeridaId}`, { method: "POST" });
+          moverDiretoResults.push({
+            id: arq.id, nome_arquivo: arq.nome_arquivo, tipo: arq.tipo,
+            banco: arq.banco, conta: arq.conta, mes_referencia: arq.mes_referencia,
+            status: "movido_empresa", duplicata_de: null,
+            empresa_id: conta.empresaSugeridaId!, cnpj_extraido: arq.cnpj_extraido,
+            confidence: arq.confidence, nome_sugerido: `→ ${conta.empresaNome ?? conta.empresaSugeridaId}`,
+          });
+        } catch {
+          moverDiretoResults.push({
+            id: arq.id, nome_arquivo: arq.nome_arquivo, tipo: arq.tipo,
+            banco: arq.banco, conta: arq.conta, mes_referencia: arq.mes_referencia,
+            status: "erro", duplicata_de: null,
+            empresa_id: conta.empresaSugeridaId!, cnpj_extraido: arq.cnpj_extraido,
+            confidence: arq.confidence,
+          });
+        }
+      }
+    }
+
     const mapeamentos: { documento_id: string; acao: string; is_nova_conta: boolean; allow_format_duplicate: boolean }[] = [];
 
     const gruposFormatosIds = new Set(gruposFormatos.flatMap((g) => g.arquivos.map((a) => a.id)));
     const semTipoIds = new Set(arquivosSemTipo.map((a) => a.arquivo.id));
 
     const pertenceArquivos = contas
-      .filter((c) => c.pertence && !c.oculta)
+      .filter((c) => c.pertence && !c.oculta && !c.moverDireto)
       .flatMap((c) => c.arquivos)
       .filter((a) => !!a.id);
 
     const naoPertenceArquivos = contas
-      .filter((c) => !c.pertence || c.oculta)
+      .filter((c) => (!c.pertence || c.oculta) && !c.moverDireto)
       .flatMap((c) => c.arquivos)
       .filter((a) => !!a.id);
 
@@ -312,7 +343,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         body: JSON.stringify({ empresa_id: empresaId, mapeamentos }),
       });
       const data = await res.json();
-      setFinalResults(data.resultados || []);
+      setFinalResults([...moverDiretoResults, ...(data.resultados || [])]);
       setStep("resultado");
     } catch {
       alert("Erro ao confirmar. Tente novamente.");
@@ -462,6 +493,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[
                   { key: "classificado",          label: "classificado",    bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" },
+                  { key: "movido_empresa",        label: "movido",          bg: "#eff6ff", color: "#2563eb", border: "#bfdbfe" },
                   { key: "duplicata",             label: "duplicata",       bg: "#fff7ed", color: "#c2410c", border: "#fed7aa" },
                   { key: "aguardando_roteamento", label: "fila global",     bg: "#faf5ff", color: "#7c3aed", border: "#ddd6fe" },
                   { key: "nao_reconhecido",       label: "não identificado", bg: "#fefce8", color: "#d97706", border: "#fde68a" },
@@ -519,10 +551,14 @@ function ContasIdentificacaoStep({
 }) {
   const visiveis = contas.filter((c) => !c.oculta);
   const ocultas = contas.filter((c) => c.oculta);
+  const moverDiretoContas = contas.filter((c) => c.moverDireto);
   const totalArquivos = contas.flatMap((c) => c.arquivos).length;
 
   function toggle(key: string, pertence: boolean) {
-    setContas((prev) => prev.map((c) => (c.key === key ? { ...c, pertence } : c)));
+    setContas((prev) => prev.map((c) => (c.key === key ? { ...c, pertence, moverDireto: false } : c)));
+  }
+  function setMoverDireto(key: string) {
+    setContas((prev) => prev.map((c) => (c.key === key ? { ...c, pertence: false, moverDireto: true } : c)));
   }
   function ocultar(key: string) {
     setContas((prev) => prev.map((c) => (c.key === key ? { ...c, oculta: true } : c)));
@@ -552,9 +588,15 @@ function ContasIdentificacaoStep({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
         {visiveis.map((conta) => (
-          <ContaCardUI key={conta.key} conta={conta} onToggle={toggle} onOcultar={ocultar} />
+          <ContaCardUI key={conta.key} conta={conta} onToggle={toggle} onOcultar={ocultar} onMoverDireto={setMoverDireto} />
         ))}
       </div>
+
+      {moverDiretoContas.length > 0 && (
+        <div style={{ marginBottom: 8, padding: "8px 14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, fontSize: 12, color: "#1e40af" }}>
+          → {moverDiretoContas.flatMap((c) => c.arquivos).length} arquivo{moverDiretoContas.flatMap((c) => c.arquivos).length !== 1 ? "s" : ""} serão enviados diretamente para: {moverDiretoContas.map((c) => c.empresaNome ?? c.empresaSugeridaId).join(", ")}
+        </div>
+      )}
 
       {ocultas.length > 0 && (
         <div style={{ marginBottom: 16, padding: "8px 14px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 8, fontSize: 12, color: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -594,14 +636,15 @@ function ContasIdentificacaoStep({
   );
 }
 
-function ContaCardUI({ conta, onToggle, onOcultar }: {
+function ContaCardUI({ conta, onToggle, onOcultar, onMoverDireto }: {
   conta: ContaCard;
   onToggle: (key: string, pertence: boolean) => void;
   onOcultar: (key: string) => void;
+  onMoverDireto: (key: string) => void;
 }) {
   const isUnknown = conta.key.startsWith("unknown_");
-  const bg = conta.pertence ? "#f0fdf4" : "#fef2f2";
-  const border = conta.pertence ? "#bbf7d0" : "#fca5a5";
+  const bg = conta.moverDireto ? "#eff6ff" : conta.pertence ? "#f0fdf4" : "#fef2f2";
+  const border = conta.moverDireto ? "#bfdbfe" : conta.pertence ? "#bbf7d0" : "#fca5a5";
 
   return (
     <div style={{ padding: "12px 14px", background: bg, border: `1px solid ${border}`, borderRadius: 10 }}>
@@ -647,15 +690,21 @@ function ContaCardUI({ conta, onToggle, onOcultar }: {
         <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={() => onToggle(conta.key, true)}
-              style={{ padding: "5px 12px", background: conta.pertence ? "#16a34a" : "white", color: conta.pertence ? "white" : "#16a34a", border: "1px solid #16a34a", borderRadius: 6, fontSize: 12, fontWeight: conta.pertence ? 700 : 400, cursor: "pointer" }}>
+              style={{ padding: "5px 12px", background: conta.pertence && !conta.moverDireto ? "#16a34a" : "white", color: conta.pertence && !conta.moverDireto ? "white" : "#16a34a", border: "1px solid #16a34a", borderRadius: 6, fontSize: 12, fontWeight: conta.pertence && !conta.moverDireto ? 700 : 400, cursor: "pointer" }}>
               ✓ Pertence
             </button>
             <button onClick={() => onToggle(conta.key, false)}
-              style={{ padding: "5px 12px", background: !conta.pertence ? "#b91c1c" : "white", color: !conta.pertence ? "white" : "#b91c1c", border: "1px solid #b91c1c", borderRadius: 6, fontSize: 12, fontWeight: !conta.pertence ? 700 : 400, cursor: "pointer" }}>
+              style={{ padding: "5px 12px", background: !conta.pertence && !conta.moverDireto ? "#b91c1c" : "white", color: !conta.pertence && !conta.moverDireto ? "white" : "#b91c1c", border: "1px solid #b91c1c", borderRadius: 6, fontSize: 12, fontWeight: !conta.pertence && !conta.moverDireto ? 700 : 400, cursor: "pointer" }}>
               ✗ Não pertence
             </button>
           </div>
-          {!conta.pertence && (
+          {conta.empresaSugeridaId && (
+            <button onClick={() => onMoverDireto(conta.key)}
+              style={{ padding: "5px 12px", background: conta.moverDireto ? "#2563eb" : "white", color: conta.moverDireto ? "white" : "#2563eb", border: "1px solid #2563eb", borderRadius: 6, fontSize: 12, fontWeight: conta.moverDireto ? 700 : 400, cursor: "pointer", textAlign: "center" }}>
+              {conta.moverDireto ? "✓ " : ""}→ Enviar para {conta.empresaNome ?? conta.empresaSugeridaId}
+            </button>
+          )}
+          {!conta.pertence && !conta.moverDireto && (
             <button onClick={() => onOcultar(conta.key)}
               style={{ padding: "4px 10px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 11, cursor: "pointer", textAlign: "center" }}>
               Remover da tela
@@ -684,12 +733,17 @@ function ArquivosRevisaoStep({
   const semTipoIds = new Set(arquivosSemTipo.map((a) => a.arquivo.id));
 
   const pertenceArquivos = contas
-    .filter((c) => c.pertence && !c.oculta)
+    .filter((c) => c.pertence && !c.oculta && !c.moverDireto)
     .flatMap((c) => c.arquivos)
     .filter((a) => !!a.id);
 
   const naoPertenceArquivos = contas
-    .filter((c) => !c.pertence || c.oculta)
+    .filter((c) => (!c.pertence || c.oculta) && !c.moverDireto)
+    .flatMap((c) => c.arquivos)
+    .filter((a) => !!a.id);
+
+  const moverDiretoArquivos = contas
+    .filter((c) => c.moverDireto)
     .flatMap((c) => c.arquivos)
     .filter((a) => !!a.id);
 
@@ -818,6 +872,14 @@ function ArquivosRevisaoStep({
         </div>
       )}
 
+      {/* Resumo de mover direto */}
+      {moverDiretoArquivos.length > 0 && (
+        <div style={{ marginBottom: 12, padding: "10px 14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, fontSize: 12, color: "#1e40af" }}>
+          → <strong>{moverDiretoArquivos.length} arquivo{moverDiretoArquivos.length !== 1 ? "s" : ""}</strong> serão enviados diretamente para:{" "}
+          {contas.filter((c) => c.moverDireto).map((c) => c.empresaNome ?? c.empresaSugeridaId).join(", ")}
+        </div>
+      )}
+
       {/* Resumo da fila global */}
       {totalFilaGlobal > 0 && (
         <div style={{ marginBottom: 24, padding: "10px 14px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 8, fontSize: 12, color: "#7c3aed" }}>
@@ -906,6 +968,7 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
   const { status } = resultado;
   const cfg = ({
     classificado:          { icon: "✓",  color: "#16a34a", bg: "#f0fdf4",  label: "Classificado" },
+    movido_empresa:        { icon: "→",  color: "#2563eb", bg: "#eff6ff",  label: "Movido" },
     duplicata:             { icon: "⚠",  color: "#c2410c", bg: "#fff7ed",  label: "Duplicata" },
     nao_reconhecido:       { icon: "?",  color: "#d97706", bg: "#fefce8",  label: "Não identificado" },
     aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff",  label: "Fila Global" },
