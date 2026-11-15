@@ -20,9 +20,15 @@ const TIPO_LABEL: Record<string, string> = {
 };
 const TIPOS_DOC = Object.entries(TIPO_LABEL).map(([value, label]) => ({ value, label }));
 
-type Step = "selecao" | "scan_loading" | "pre_classif" | "confirm_loading" | "resultados";
-type Acao = "salvar_aqui" | "fila_espera" | "baixar";
-type RazaoDecisao = "empresa_errada" | "conta_nova" | "incompleto" | "nao_reconhecido";
+// ── Tipos ──────────────────────────────────────────────────────────────────
+
+type Step =
+  | "selecao"
+  | "scan_loading"
+  | "contas_identificacao"
+  | "arquivos_revisao"
+  | "confirm_loading"
+  | "resultado";
 
 type ScanArquivo = {
   id: string;
@@ -40,16 +46,30 @@ type ScanArquivo = {
   erro?: string;
 };
 
-type GrupoContas = {
+type ContaCard = {
   key: string;
-  label: string;
-  tipo: string | null;
+  cnpj: string | null;
+  empresaNome: string | null;
   banco: string | null;
   conta: string | null;
-  documentos: ScanArquivo[];
-  razao: RazaoDecisao;
-  empresaSugeridaNome: string | null;
-  cnpjExtraido: string | null;
+  arquivos: ScanArquivo[];
+  pertence: boolean;
+  oculta: boolean;
+};
+
+type GrupoFormatos = {
+  key: string;
+  tipo: string;
+  banco: string | null;
+  conta: string | null;
+  mesRef: string | null;
+  arquivos: ScanArquivo[];
+  manter: string[]; // ids dos arquivos que o usuário quer manter
+};
+
+type ArquivoSemTipo = {
+  arquivo: ScanArquivo;
+  tipoSelecionado: string | null;
 };
 
 type ResultadoFinal = {
@@ -76,23 +96,26 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   const [step, setStep] = useState<Step>("selecao");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [scanProgress, setScanProgress] = useState(0);
+  const [scanErroGeral, setScanErroGeral] = useState<string | null>(null);
+  const [erros, setErros] = useState<ScanArquivo[]>([]);
 
-  const [gruposConfirmados, setGruposConfirmados] = useState<GrupoContas[]>([]);
-  const [gruposDecisao, setGruposDecisao] = useState<GrupoContas[]>([]);
-  const [naoReconhecidos, setNaoReconhecidos] = useState<ScanArquivo[]>([]);
-  const [comErro, setComErro] = useState<ScanArquivo[]>([]);
+  // Etapa 2: contas identificadas
+  const [contas, setContas] = useState<ContaCard[]>([]);
 
-  const [acoes, setAcoes] = useState<Record<string, Acao>>({});
-  const [contasNovas, setContasNovas] = useState<Record<string, boolean>>({});
+  // Etapa 3: arquivos por conta confirmada
+  const [gruposFormatos, setGruposFormatos] = useState<GrupoFormatos[]>([]);
+  const [arquivosSemTipo, setArquivosSemTipo] = useState<ArquivoSemTipo[]>([]);
 
+  // Resultado
   const [finalResults, setFinalResults] = useState<ResultadoFinal[]>([]);
   const [previewState, setPreviewState] = useState<{ url: string; nome: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
-  const [scanErroGeral, setScanErroGeral] = useState<string | null>(null);
 
   function addFiles(files: FileList | File[]) {
     setSelectedFiles((prev) => [...prev, ...Array.from(files)]);
   }
+
+  // ── Scan ────────────────────────────────────────────────────────────────
 
   async function handleScan() {
     if (!selectedFiles.length) return;
@@ -102,7 +125,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
     const allArquivos: ScanArquivo[] = [];
 
-    // Processa um arquivo por vez para barra de progresso real
     for (let i = 0; i < selectedFiles.length; i++) {
       setScanProgress(i + 1);
       const f = selectedFiles[i];
@@ -134,89 +156,153 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       }
     }
 
-    // Agrupa resultados
-    const erros: ScanArquivo[] = [];
-    const naoRec: ScanArquivo[] = [];
-    const confirmadosMap = new Map<string, GrupoContas>();
-    const decisaoMap = new Map<string, GrupoContas>();
-    const contasNovasMap: Record<string, boolean> = {};
+    // Separa erros e monta ContaCards
+    const errosList = allArquivos.filter((a) => a.status === "erro" || !!a.erro);
+    const validos = allArquivos.filter((a) => a.status !== "erro" && !a.erro);
 
-    for (const arq of allArquivos) {
-      if (arq.status === "erro" || arq.erro) { erros.push(arq); continue; }
-      if (arq.status === "nao_reconhecido") { naoRec.push(arq); continue; }
-
-      const ehEmpresaErrada = !!arq.empresa_sugerida_id && arq.empresa_sugerida_id !== empresaId;
-      const ehIncompleto = arq.tipo === "extrato_bancario" && (!arq.banco || !arq.conta);
-      const precisaDecisao = ehEmpresaErrada || arq.conta_nova || ehIncompleto;
-
-      const contaNorm = (arq.conta || "").replace(/[^\d]/g, "");
-      const bancoNorm = (arq.banco || "").toLowerCase().trim();
-      const key = bancoNorm && contaNorm
-        ? `${bancoNorm}|${contaNorm}`
-        : `doc_${(arq.cnpj_extraido || "").replace(/\D/g, "") || arq.id || arq.nome_arquivo}`;
-
-      const tLabel = TIPO_LABEL[arq.tipo ?? ""] ?? "Documento";
-      const label = arq.banco && arq.conta
-        ? `${tLabel} — ${arq.banco} CC ${arq.conta}`
-        : arq.banco ? `${tLabel} — ${arq.banco}` : tLabel;
-
-      if (!precisaDecisao) {
-        if (!confirmadosMap.has(key)) {
-          confirmadosMap.set(key, {
-            key, label, tipo: arq.tipo, banco: arq.banco, conta: arq.conta,
-            documentos: [], razao: "conta_nova",
-            empresaSugeridaNome: null, cnpjExtraido: null,
-          });
-        }
-        confirmadosMap.get(key)!.documentos.push(arq);
-      } else {
-        const razao: RazaoDecisao = ehEmpresaErrada ? "empresa_errada" : ehIncompleto ? "incompleto" : "conta_nova";
-        if (!decisaoMap.has(key)) {
-          decisaoMap.set(key, {
-            key, label, tipo: arq.tipo, banco: arq.banco, conta: arq.conta,
-            documentos: [], razao,
-            empresaSugeridaNome: arq.empresa_sugerida_nome ?? null,
-            cnpjExtraido: arq.cnpj_extraido ?? null,
-          });
-          contasNovasMap[key] = arq.conta_nova;
-        }
-        decisaoMap.get(key)!.documentos.push(arq);
-      }
-    }
-
-    setGruposConfirmados(Array.from(confirmadosMap.values()));
-    setGruposDecisao(Array.from(decisaoMap.values()));
-    setNaoReconhecidos(naoRec);
-    setComErro(erros);
-    setAcoes({});
-    setContasNovas(contasNovasMap);
-    setStep("pre_classif");
+    setErros(errosList);
+    setContas(buildContaCards(validos, empresaId));
+    setStep("contas_identificacao");
   }
 
-  const totalDecisao = gruposDecisao.length + naoReconhecidos.length;
-  const totalComAcao = Object.keys(acoes).length;
-  const podeContinuar = totalDecisao === 0 || totalComAcao >= totalDecisao;
+  // ── Monta ContaCards a partir dos resultados do scan ─────────────────────
+
+  function buildContaCards(arquivos: ScanArquivo[], empId: string): ContaCard[] {
+    const map = new Map<string, ContaCard>();
+    for (const arq of arquivos) {
+      const cnpjNorm = (arq.cnpj_extraido || "").replace(/\D/g, "");
+      const bancoNorm = (arq.banco || "").toLowerCase().trim();
+      const contaNorm = (arq.conta || "").replace(/[^\d]/g, "");
+      const rawKey = `${cnpjNorm}:${bancoNorm}:${contaNorm}`;
+      const key = rawKey === "::" ? `unknown_${arq.id}` : rawKey;
+
+      if (!map.has(key)) {
+        // Pertence por padrão se CNPJ bate com a empresa ou não foi identificado
+        const pertence = !arq.empresa_sugerida_id || arq.empresa_sugerida_id === empId;
+        map.set(key, {
+          key,
+          cnpj: arq.cnpj_extraido,
+          empresaNome: arq.empresa_sugerida_nome,
+          banco: arq.banco,
+          conta: arq.conta,
+          arquivos: [],
+          pertence,
+          oculta: false,
+        });
+      }
+      map.get(key)!.arquivos.push(arq);
+    }
+    return Array.from(map.values());
+  }
+
+  // ── Avança para revisão de arquivos ──────────────────────────────────────
+
+  function goToArquivosRevisao() {
+    const pertenceArquivos = contas
+      .filter((c) => c.pertence && !c.oculta)
+      .flatMap((c) => c.arquivos)
+      .filter((a) => !!a.id);
+
+    // Encontra grupos de formatos duplicados (mesmo tipo+banco+conta+mes, 2+ arquivos)
+    const formatMap = new Map<string, GrupoFormatos>();
+    for (const arq of pertenceArquivos) {
+      if (!arq.tipo) continue;
+      const bancoNorm = (arq.banco || "").toLowerCase().trim();
+      const contaNorm = (arq.conta || "").replace(/[^\d]/g, "");
+      const fkey = `${arq.tipo}|${bancoNorm}|${contaNorm}|${arq.mes_referencia || ""}`;
+      if (!formatMap.has(fkey)) {
+        formatMap.set(fkey, {
+          key: fkey, tipo: arq.tipo, banco: arq.banco, conta: arq.conta,
+          mesRef: arq.mes_referencia, arquivos: [], manter: [],
+        });
+      }
+      formatMap.get(fkey)!.arquivos.push(arq);
+    }
+    const grupos = Array.from(formatMap.values()).filter((g) => g.arquivos.length > 1);
+    for (const g of grupos) g.manter = g.arquivos.map((a) => a.id); // padrão: manter todos
+
+    const gruposIds = new Set(grupos.flatMap((g) => g.arquivos.map((a) => a.id)));
+
+    // Arquivos sem tipo identificado (pertence, mas AI não classificou)
+    const semTipo: ArquivoSemTipo[] = pertenceArquivos
+      .filter((a) => !a.tipo && !gruposIds.has(a.id))
+      .map((a) => ({ arquivo: a, tipoSelecionado: null }));
+
+    setGruposFormatos(grupos);
+    setArquivosSemTipo(semTipo);
+    setStep("arquivos_revisao");
+  }
+
+  // ── Confirmar e salvar ────────────────────────────────────────────────────
 
   async function handleConfirmar() {
     setStep("confirm_loading");
 
-    const mapeamentos: { documento_id: string; acao: Acao; is_nova_conta?: boolean }[] = [];
+    // 1. Classificação manual para arquivos sem tipo que o usuário preencheu
+    for (const item of arquivosSemTipo) {
+      if (item.tipoSelecionado && item.arquivo.id) {
+        try {
+          await fetch(`${API}/documentos/${item.arquivo.id}/classificar-manual`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tipo: item.tipoSelecionado,
+              mes_referencia: item.arquivo.mes_referencia,
+              banco: item.arquivo.banco,
+              conta: item.arquivo.conta,
+            }),
+          });
+        } catch {}
+      }
+    }
 
-    for (const grupo of gruposConfirmados) {
-      for (const doc of grupo.documentos) {
-        mapeamentos.push({ documento_id: doc.id, acao: "salvar_aqui", is_nova_conta: doc.conta_nova });
+    // 2. Monta mapeamentos
+    const mapeamentos: { documento_id: string; acao: string; is_nova_conta: boolean; allow_format_duplicate: boolean }[] = [];
+
+    const gruposFormatosIds = new Set(gruposFormatos.flatMap((g) => g.arquivos.map((a) => a.id)));
+    const semTipoIds = new Set(arquivosSemTipo.map((a) => a.arquivo.id));
+
+    const pertenceArquivos = contas
+      .filter((c) => c.pertence && !c.oculta)
+      .flatMap((c) => c.arquivos)
+      .filter((a) => !!a.id);
+
+    const naoPertenceArquivos = contas
+      .filter((c) => !c.pertence || c.oculta)
+      .flatMap((c) => c.arquivos)
+      .filter((a) => !!a.id);
+
+    // Arquivos prontos (tipo conhecido, sem conflito de formato)
+    const prontos = pertenceArquivos.filter(
+      (a) => a.tipo && !gruposFormatosIds.has(a.id) && !semTipoIds.has(a.id),
+    );
+    for (const arq of prontos) {
+      mapeamentos.push({ documento_id: arq.id, acao: "salvar_aqui", is_nova_conta: arq.conta_nova, allow_format_duplicate: false });
+    }
+
+    // Grupos de formato duplicado
+    for (const grupo of gruposFormatos) {
+      const keepMany = grupo.manter.length > 1;
+      for (const arq of grupo.arquivos) {
+        if (grupo.manter.includes(arq.id)) {
+          mapeamentos.push({ documento_id: arq.id, acao: "salvar_aqui", is_nova_conta: arq.conta_nova, allow_format_duplicate: keepMany });
+        } else {
+          mapeamentos.push({ documento_id: arq.id, acao: "baixar", is_nova_conta: false, allow_format_duplicate: false });
+        }
       }
     }
-    for (const grupo of gruposDecisao) {
-      const acao = acoes[grupo.key] ?? "salvar_aqui";
-      const isNova = contasNovas[grupo.key] ?? false;
-      for (const doc of grupo.documentos) {
-        mapeamentos.push({ documento_id: doc.id, acao, is_nova_conta: acao === "salvar_aqui" ? isNova : false });
-      }
+
+    // Arquivos sem tipo
+    for (const item of arquivosSemTipo) {
+      if (!item.arquivo.id) continue;
+      // Se usuário classificou → salvar_aqui; senão → fila global
+      const acao = item.tipoSelecionado ? "salvar_aqui" : "fila_espera";
+      mapeamentos.push({ documento_id: item.arquivo.id, acao, is_nova_conta: false, allow_format_duplicate: false });
     }
-    for (const doc of naoReconhecidos) {
-      const acao = acoes[doc.id] ?? "salvar_aqui";
-      mapeamentos.push({ documento_id: doc.id, acao, is_nova_conta: false });
+
+    // Arquivos de contas que não pertencem → fila global
+    for (const arq of naoPertenceArquivos) {
+      mapeamentos.push({ documento_id: arq.id, acao: "fila_espera", is_nova_conta: false, allow_format_duplicate: false });
     }
 
     try {
@@ -227,22 +313,20 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       });
       const data = await res.json();
       setFinalResults(data.resultados || []);
-      setStep("resultados");
+      setStep("resultado");
     } catch {
       alert("Erro ao confirmar. Tente novamente.");
-      setStep("pre_classif");
+      setStep("arquivos_revisao");
     }
   }
 
   function resetar() {
     setSelectedFiles([]);
-    setGruposConfirmados([]);
-    setGruposDecisao([]);
-    setNaoReconhecidos([]);
-    setComErro([]);
+    setErros([]);
+    setContas([]);
+    setGruposFormatos([]);
+    setArquivosSemTipo([]);
     setFinalResults([]);
-    setAcoes({});
-    setContasNovas({});
     setScanErroGeral(null);
     setScanProgress(0);
     setStep("selecao");
@@ -259,6 +343,8 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     finally { setPreviewLoading(null); }
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div style={{ maxWidth: 760 }}>
       <div style={{ marginBottom: 20 }}>
@@ -267,7 +353,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         </Link>
         <h1 style={{ fontSize: 20, fontWeight: 700, marginTop: 8, color: "#0c1a2e" }}>Enviar documentos</h1>
         <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
-          Selecione os arquivos — a IA extrai e classifica automaticamente.
+          Selecione os arquivos — a IA identifica as contas e classifica automaticamente.
         </p>
       </div>
 
@@ -286,7 +372,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
               accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.bmp,.xml,.ofx,.ofc,.xlsx,.xls,.csv"
               onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
             />
-
             {step === "scan_loading" ? (
               <>
                 <p style={{ fontSize: 28, marginBottom: 10 }}>⚙️</p>
@@ -294,11 +379,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
                   Analisando arquivo {scanProgress} de {selectedFiles.length}…
                 </p>
                 <div style={{ width: "100%", maxWidth: 400, margin: "0 auto 8px", background: "#e5e7eb", borderRadius: 20, height: 8, overflow: "hidden" }}>
-                  <div style={{
-                    height: "100%", borderRadius: 20, background: "#c4a030",
-                    width: `${Math.round((scanProgress / selectedFiles.length) * 100)}%`,
-                    transition: "width 0.4s ease",
-                  }} />
+                  <div style={{ height: "100%", borderRadius: 20, background: "#c4a030", width: `${Math.round((scanProgress / selectedFiles.length) * 100)}%`, transition: "width 0.4s ease" }} />
                 </div>
                 <p style={{ fontSize: 11, color: "#9ca3af" }}>
                   {Math.round((scanProgress / selectedFiles.length) * 100)}% — a IA está lendo e extraindo as informações
@@ -339,94 +420,29 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         </div>
       )}
 
-      {/* ── Etapa 2: Revisão ── */}
-      {step === "pre_classif" && (
-        <div>
-          <p style={{ fontSize: 13, color: "#374151", marginBottom: 20 }}>
-            A IA analisou os arquivos. <strong>Decida o destino</strong> dos itens marcados — os demais serão salvos automaticamente. Clique em <strong>Confirmar e salvar</strong> para finalizar.
-          </p>
+      {/* ── Etapa 2: Contas identificadas ── */}
+      {step === "contas_identificacao" && (
+        <ContasIdentificacaoStep
+          empresaNome={empresaNome}
+          contas={contas}
+          setContas={setContas}
+          erros={erros}
+          onNext={goToArquivosRevisao}
+          onVoltar={resetar}
+        />
+      )}
 
-          {(gruposDecisao.length > 0 || naoReconhecidos.length > 0) && (
-            <div style={{ marginBottom: 24 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#c2410c", marginBottom: 6 }}>
-                ⚠ Requer sua decisão ({totalDecisao})
-              </h3>
-              <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
-                Selecione uma ação para cada item. As ações serão executadas ao clicar em <strong>Confirmar e salvar</strong>.
-              </p>
-
-              {gruposDecisao.map((grupo) => (
-                <DecisaoCard
-                  key={grupo.key}
-                  grupo={grupo}
-                  acaoSelecionada={acoes[grupo.key] ?? null}
-                  onAcao={(a) => setAcoes((prev) => ({ ...prev, [grupo.key]: a }))}
-                />
-              ))}
-
-              {naoReconhecidos.map((arq) => (
-                <DecisaoCard
-                  key={arq.id}
-                  grupo={{
-                    key: arq.id, label: arq.nome_arquivo, tipo: arq.tipo,
-                    banco: arq.banco, conta: arq.conta, documentos: [arq],
-                    razao: "nao_reconhecido", empresaSugeridaNome: null,
-                    cnpjExtraido: arq.cnpj_extraido,
-                  }}
-                  acaoSelecionada={acoes[arq.id] ?? null}
-                  onAcao={(a) => setAcoes((prev) => ({ ...prev, [arq.id]: a }))}
-                />
-              ))}
-            </div>
-          )}
-
-          {gruposConfirmados.length > 0 && (
-            <details style={{ marginBottom: 24 }}>
-              <summary style={{ fontSize: 13, fontWeight: 600, color: "#16a34a", cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", gap: 6, padding: "8px 0", borderTop: "1px solid #e5e7eb" }}>
-                ▶ {gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0)} arquivo{gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0) !== 1 ? "s" : ""} prontos para salvar — clique para ver
-              </summary>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
-                {gruposConfirmados.map((grupo) => (
-                  <div key={grupo.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 12 }}>
-                    <span style={{ color: "#16a34a", fontWeight: 600, flexShrink: 0 }}>✓</span>
-                    <span style={{ flex: 1, color: "#374151" }}>{grupo.label}</span>
-                    <span style={{ fontSize: 11, color: "#6b7280" }}>{grupo.documentos.length} arq.</span>
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
-
-          {comErro.length > 0 && (
-            <div style={{ marginBottom: 20, padding: "12px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 6 }}>✗ Falha ao processar:</p>
-              {comErro.map((arq, i) => <p key={i} style={{ fontSize: 12, color: "#7f1d1d" }}>{arq.nome_arquivo}: {arq.erro}</p>)}
-            </div>
-          )}
-
-          {gruposConfirmados.length === 0 && gruposDecisao.length === 0 && naoReconhecidos.length === 0 && (
-            <div style={{ padding: 16, background: "#f0fdf4", borderRadius: 8, fontSize: 13, color: "#16a34a" }}>
-              Nenhum arquivo processado com sucesso.
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <button
-              onClick={handleConfirmar}
-              disabled={!podeContinuar || (gruposConfirmados.length === 0 && gruposDecisao.length === 0 && naoReconhecidos.length === 0)}
-              title={!podeContinuar ? "Escolha uma ação para todos os itens em vermelho" : undefined}
-              style={{ padding: "10px 28px", background: podeContinuar ? "#c4a030" : "#e5e7eb", color: podeContinuar ? "#0c1a2e" : "#9ca3af", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: podeContinuar ? "pointer" : "not-allowed" }}
-            >
-              {totalDecisao > 0 && totalComAcao < totalDecisao
-                ? `Escolha as ações (${totalComAcao}/${totalDecisao})`
-                : "Confirmar e salvar →"}
-            </button>
-            <button onClick={resetar}
-              style={{ padding: "10px 18px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
-              ← Voltar
-            </button>
-          </div>
-        </div>
+      {/* ── Etapa 3: Revisão de arquivos ── */}
+      {step === "arquivos_revisao" && (
+        <ArquivosRevisaoStep
+          contas={contas}
+          gruposFormatos={gruposFormatos}
+          setGruposFormatos={setGruposFormatos}
+          arquivosSemTipo={arquivosSemTipo}
+          setArquivosSemTipo={setArquivosSemTipo}
+          onConfirmar={handleConfirmar}
+          onVoltar={() => setStep("contas_identificacao")}
+        />
       )}
 
       {step === "confirm_loading" && (
@@ -437,21 +453,19 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         </div>
       )}
 
-      {/* ── Resultado inline (mesmo passo visual) ── */}
-      {step === "resultados" && (
+      {/* ── Resultado ── */}
+      {step === "resultado" && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
             <div>
-              <p style={{ fontSize: 13, color: "#374151", marginBottom: 10 }}>
-                Envio concluído. Veja abaixo o resultado de cada arquivo.
-              </p>
+              <p style={{ fontSize: 13, color: "#374151", marginBottom: 10 }}>Envio concluído. Resultado por arquivo:</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[
-                  { key: "classificado",          label: "classificado",  bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" },
-                  { key: "duplicata",             label: "duplicata",     bg: "#fff7ed", color: "#c2410c", border: "#fed7aa" },
-                  { key: "aguardando_roteamento", label: "na fila",        bg: "#faf5ff", color: "#7c3aed", border: "#ddd6fe" },
+                  { key: "classificado",          label: "classificado",    bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" },
+                  { key: "duplicata",             label: "duplicata",       bg: "#fff7ed", color: "#c2410c", border: "#fed7aa" },
+                  { key: "aguardando_roteamento", label: "fila global",     bg: "#faf5ff", color: "#7c3aed", border: "#ddd6fe" },
                   { key: "nao_reconhecido",       label: "não identificado", bg: "#fefce8", color: "#d97706", border: "#fde68a" },
-                  { key: "baixado",               label: "baixado",       bg: "#f9fafb", color: "#6b7280", border: "#e5e7eb" },
+                  { key: "baixado",               label: "baixado",          bg: "#f9fafb", color: "#6b7280", border: "#e5e7eb" },
                 ].map(({ key, label, bg, color, border }) => {
                   const n = finalResults.filter((r) => r.status === key).length;
                   return n > 0 ? (
@@ -461,6 +475,14 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
                   ) : null;
                 })}
               </div>
+              {finalResults.some((r) => r.status === "aguardando_roteamento") && (
+                <p style={{ fontSize: 12, color: "#7c3aed", marginTop: 8 }}>
+                  Arquivos na fila global aguardam destino.{" "}
+                  <Link href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>
+                    Ir para Fila Global →
+                  </Link>
+                </p>
+              )}
             </div>
             <button onClick={resetar}
               style={{ padding: "8px 18px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0, marginLeft: 12 }}>
@@ -470,12 +492,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {finalResults.map((resultado) => (
-              <ResultadoRow
-                key={resultado.id}
-                resultado={resultado}
-                onPreview={handlePreview}
-                previewLoading={previewLoading}
-              />
+              <ResultadoRow key={resultado.id} resultado={resultado} onPreview={handlePreview} previewLoading={previewLoading} />
             ))}
           </div>
         </div>
@@ -488,87 +505,372 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   );
 }
 
-// ── Card de decisão ────────────────────────────────────────────────────────
+// ── Etapa 2: Contas identificadas ──────────────────────────────────────────
 
-function DecisaoCard({ grupo, acaoSelecionada, onAcao }: {
-  grupo: GrupoContas;
-  acaoSelecionada: Acao | null;
-  onAcao: (a: Acao) => void;
+function ContasIdentificacaoStep({
+  empresaNome, contas, setContas, erros, onNext, onVoltar,
+}: {
+  empresaNome: string;
+  contas: ContaCard[];
+  setContas: React.Dispatch<React.SetStateAction<ContaCard[]>>;
+  erros: ScanArquivo[];
+  onNext: () => void;
+  onVoltar: () => void;
 }) {
-  const razaoInfo: Record<RazaoDecisao, { texto: string; cor: string }> = {
-    empresa_errada: {
-      texto: grupo.empresaSugeridaNome ? `Parece ser de: ${grupo.empresaSugeridaNome}` : "Conta de outra empresa",
-      cor: "#c2410c",
-    },
-    conta_nova: {
-      texto: "Nova conta detectada — confirme se pertence a esta empresa",
-      cor: "#7c3aed",
-    },
-    incompleto: {
-      texto: "A IA não identificou o número da conta — verifique o arquivo",
-      cor: "#d97706",
-    },
-    nao_reconhecido: {
-      texto: "A IA não conseguiu identificar este arquivo",
-      cor: "#d97706",
-    },
-  };
+  const visiveis = contas.filter((c) => !c.oculta);
+  const ocultas = contas.filter((c) => c.oculta);
+  const totalArquivos = contas.flatMap((c) => c.arquivos).length;
 
-  const { texto, cor } = razaoInfo[grupo.razao];
-  const opcoes: { key: Acao; label: string; desc: string; cor: string; bg: string }[] = [
-    { key: "salvar_aqui", label: "Salvar aqui",    desc: "Aceita na empresa atual",               cor: "#15803d", bg: "#f0fdf4" },
-    { key: "fila_espera", label: "Fila de espera", desc: "Aguarda ser puxado pela empresa certa", cor: "#7c3aed", bg: "#faf5ff" },
-    { key: "baixar",      label: "Baixar arquivo", desc: "Faz download e descarta do sistema",    cor: "#6b7280", bg: "#f9fafb" },
-  ];
+  function toggle(key: string, pertence: boolean) {
+    setContas((prev) => prev.map((c) => (c.key === key ? { ...c, pertence } : c)));
+  }
+  function ocultar(key: string) {
+    setContas((prev) => prev.map((c) => (c.key === key ? { ...c, oculta: true } : c)));
+  }
+  function mostrarTodas() {
+    setContas((prev) => prev.map((c) => ({ ...c, oculta: false })));
+  }
 
   return (
-    <div style={{ padding: "12px 14px", background: "#fff7ed", border: `1px solid ${acaoSelecionada ? "#d1d5db" : "#fed7aa"}`, borderRadius: 8, marginBottom: 8 }}>
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{grupo.label}</span>
-          {grupo.documentos.length > 1 && <span style={{ fontSize: 11, color: "#9ca3af" }}>{grupo.documentos.length} arquivos</span>}
+    <div>
+      <p style={{ fontSize: 13, color: "#374151", marginBottom: 6 }}>
+        A IA identificou as contas abaixo nos <strong>{totalArquivos} arquivo{totalArquivos !== 1 ? "s" : ""}</strong> enviados.
+        Indique quais <strong>pertencem a {empresaNome}</strong>.
+      </p>
+      <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 20 }}>
+        As contas que não pertencem podem ser removidas da tela — os arquivos irão para a <strong>Fila Global</strong>, onde você decide o destino.
+      </p>
+
+      {visiveis.length === 0 && contas.length > 0 && (
+        <div style={{ padding: "16px", background: "#f9fafb", borderRadius: 8, fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+          Todas as contas foram ocultadas.{" "}
+          <button onClick={mostrarTodas} style={{ background: "none", border: "none", color: "#c4a030", cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+            Mostrar todas
+          </button>
         </div>
-        <p style={{ fontSize: 12, color: cor, marginTop: 3 }}>{texto}</p>
-        {grupo.cnpjExtraido && (
-          <p style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-            CNPJ lido no documento: <strong>{_formatCnpj(grupo.cnpjExtraido)}</strong>
-          </p>
-        )}
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
+        {visiveis.map((conta) => (
+          <ContaCardUI key={conta.key} conta={conta} onToggle={toggle} onOcultar={ocultar} />
+        ))}
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {opcoes.map((op) => {
-          const ativo = acaoSelecionada === op.key;
-          return (
-            <button
-              key={op.key}
-              onClick={() => onAcao(op.key)}
-              title={op.desc}
-              style={{
-                padding: "6px 14px",
-                background: ativo ? op.bg : "white",
-                color: ativo ? op.cor : "#374151",
-                border: `1px solid ${ativo ? op.cor : "#d1d5db"}`,
-                borderRadius: 6, fontSize: 12, fontWeight: ativo ? 700 : 400,
-                cursor: "pointer", transition: "all 0.1s",
-              }}
-            >
-              {ativo ? "✓ " : ""}{op.label}
-            </button>
-          );
-        })}
+
+      {ocultas.length > 0 && (
+        <div style={{ marginBottom: 16, padding: "8px 14px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 8, fontSize: 12, color: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>{ocultas.length} conta{ocultas.length !== 1 ? "s" : ""} oculta{ocultas.length !== 1 ? "s" : ""} — {ocultas.flatMap((c) => c.arquivos).length} arquivo{ocultas.flatMap((c) => c.arquivos).length !== 1 ? "s" : ""} irão para a Fila Global</span>
+          <button onClick={mostrarTodas} style={{ background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontWeight: 600, fontSize: 12, textDecoration: "underline" }}>
+            Mostrar
+          </button>
+        </div>
+      )}
+
+      {erros.length > 0 && (
+        <div style={{ marginBottom: 16, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8 }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 4 }}>✗ Falha ao processar:</p>
+          {erros.map((arq, i) => (
+            <p key={i} style={{ fontSize: 12, color: "#7f1d1d" }}>{arq.nome_arquivo}: {arq.erro}</p>
+          ))}
+        </div>
+      )}
+
+      {contas.length === 0 && (
+        <div style={{ padding: 20, background: "#fefce8", borderRadius: 8, fontSize: 13, color: "#d97706" }}>
+          Nenhuma informação de conta foi identificada nos arquivos.
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <button onClick={onNext} disabled={visiveis.length === 0 && ocultas.length === contas.length && contas.length > 0}
+          style={{ padding: "10px 28px", background: "#c4a030", color: "#0c1a2e", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+          Revisar arquivos →
+        </button>
+        <button onClick={onVoltar}
+          style={{ padding: "10px 18px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+          ← Voltar
+        </button>
       </div>
     </div>
   );
 }
 
-// ── Indicador de etapas ────────────────────────────────────────────────────
+function ContaCardUI({ conta, onToggle, onOcultar }: {
+  conta: ContaCard;
+  onToggle: (key: string, pertence: boolean) => void;
+  onOcultar: (key: string) => void;
+}) {
+  const isUnknown = conta.key.startsWith("unknown_");
+  const bg = conta.pertence ? "#f0fdf4" : "#fef2f2";
+  const border = conta.pertence ? "#bbf7d0" : "#fca5a5";
+
+  return (
+    <div style={{ padding: "12px 14px", background: bg, border: `1px solid ${border}`, borderRadius: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        {/* Informações da conta */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {isUnknown ? (
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4 }}>
+              Arquivo não identificado
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 16px", fontSize: 12 }}>
+              {conta.cnpj && (
+                <span style={{ color: "#374151" }}>
+                  <span style={{ color: "#9ca3af" }}>CNPJ: </span>
+                  <strong>{_formatCnpj(conta.cnpj)}</strong>
+                </span>
+              )}
+              {conta.empresaNome && (
+                <span style={{ color: "#374151" }}>
+                  <span style={{ color: "#9ca3af" }}>Empresa: </span>
+                  <strong>{conta.empresaNome}</strong>
+                </span>
+              )}
+              {conta.banco && (
+                <span style={{ color: "#374151" }}>
+                  <span style={{ color: "#9ca3af" }}>Banco: </span>{conta.banco}
+                </span>
+              )}
+              {conta.conta && (
+                <span style={{ color: "#374151" }}>
+                  <span style={{ color: "#9ca3af" }}>CC: </span>{conta.conta}
+                </span>
+              )}
+            </div>
+          )}
+          <p style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+            {conta.arquivos.length} arquivo{conta.arquivos.length !== 1 ? "s" : ""}: {conta.arquivos.map((a) => a.nome_arquivo).join(", ").slice(0, 80)}{conta.arquivos.map((a) => a.nome_arquivo).join(", ").length > 80 ? "…" : ""}
+          </p>
+        </div>
+
+        {/* Botões de decisão */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => onToggle(conta.key, true)}
+              style={{ padding: "5px 12px", background: conta.pertence ? "#16a34a" : "white", color: conta.pertence ? "white" : "#16a34a", border: "1px solid #16a34a", borderRadius: 6, fontSize: 12, fontWeight: conta.pertence ? 700 : 400, cursor: "pointer" }}>
+              ✓ Pertence
+            </button>
+            <button onClick={() => onToggle(conta.key, false)}
+              style={{ padding: "5px 12px", background: !conta.pertence ? "#b91c1c" : "white", color: !conta.pertence ? "white" : "#b91c1c", border: "1px solid #b91c1c", borderRadius: 6, fontSize: 12, fontWeight: !conta.pertence ? 700 : 400, cursor: "pointer" }}>
+              ✗ Não pertence
+            </button>
+          </div>
+          {!conta.pertence && (
+            <button onClick={() => onOcultar(conta.key)}
+              style={{ padding: "4px 10px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 11, cursor: "pointer", textAlign: "center" }}>
+              Remover da tela
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Etapa 3: Revisão de arquivos ───────────────────────────────────────────
+
+function ArquivosRevisaoStep({
+  contas, gruposFormatos, setGruposFormatos, arquivosSemTipo, setArquivosSemTipo, onConfirmar, onVoltar,
+}: {
+  contas: ContaCard[];
+  gruposFormatos: GrupoFormatos[];
+  setGruposFormatos: React.Dispatch<React.SetStateAction<GrupoFormatos[]>>;
+  arquivosSemTipo: ArquivoSemTipo[];
+  setArquivosSemTipo: React.Dispatch<React.SetStateAction<ArquivoSemTipo[]>>;
+  onConfirmar: () => void;
+  onVoltar: () => void;
+}) {
+  const gruposFormatosIds = new Set(gruposFormatos.flatMap((g) => g.arquivos.map((a) => a.id)));
+  const semTipoIds = new Set(arquivosSemTipo.map((a) => a.arquivo.id));
+
+  const pertenceArquivos = contas
+    .filter((c) => c.pertence && !c.oculta)
+    .flatMap((c) => c.arquivos)
+    .filter((a) => !!a.id);
+
+  const naoPertenceArquivos = contas
+    .filter((c) => !c.pertence || c.oculta)
+    .flatMap((c) => c.arquivos)
+    .filter((a) => !!a.id);
+
+  const prontos = pertenceArquivos.filter(
+    (a) => a.tipo && !gruposFormatosIds.has(a.id) && !semTipoIds.has(a.id),
+  );
+
+  function toggleManter(grupoKey: string, arqId: string) {
+    setGruposFormatos((prev) =>
+      prev.map((g) => {
+        if (g.key !== grupoKey) return g;
+        const nova = g.manter.includes(arqId) ? g.manter.filter((id) => id !== arqId) : [...g.manter, arqId];
+        return { ...g, manter: nova };
+      }),
+    );
+  }
+
+  function setTipo(arqId: string, tipo: string | null) {
+    setArquivosSemTipo((prev) =>
+      prev.map((a) => (a.arquivo.id === arqId ? { ...a, tipoSelecionado: tipo } : a)),
+    );
+  }
+
+  const semTipoSemClassif = arquivosSemTipo.filter((a) => !a.tipoSelecionado).length;
+  const totalFilaGlobal = naoPertenceArquivos.length + semTipoSemClassif;
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: "#374151", marginBottom: 20 }}>
+        Revise os arquivos das contas confirmadas. Clique em <strong>Confirmar e salvar</strong> para finalizar.
+      </p>
+
+      {/* Prontos para salvar */}
+      {prontos.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: "#16a34a", marginBottom: 8 }}>
+            ✓ Prontos para salvar ({prontos.length})
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {prontos.map((arq) => (
+              <div key={arq.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 12 }}>
+                <span style={{ color: "#16a34a", flexShrink: 0 }}>✓</span>
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#374151" }}>{arq.nome_arquivo}</span>
+                <span style={{ color: "#9ca3af", flexShrink: 0 }}>{TIPO_LABEL[arq.tipo ?? ""] ?? arq.tipo}</span>
+                {arq.mes_referencia && <span style={{ color: "#9ca3af", flexShrink: 0 }}>{_mesPtBR(arq.mes_referencia)}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Formatos duplicados */}
+      {gruposFormatos.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: "#2563eb", marginBottom: 4 }}>
+            📋 Formatos duplicados ({gruposFormatos.reduce((s, g) => s + g.arquivos.length, 0)} arquivos)
+          </h3>
+          <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+            O mesmo documento foi enviado em múltiplos formatos. Escolha quais manter no sistema — ao gerar lançamentos você decide qual usar.
+          </p>
+          {gruposFormatos.map((grupo) => {
+            const label = [
+              TIPO_LABEL[grupo.tipo] ?? grupo.tipo,
+              grupo.banco && `${grupo.banco}`,
+              grupo.conta && `CC ${grupo.conta}`,
+              grupo.mesRef && _mesPtBR(grupo.mesRef),
+            ].filter(Boolean).join(" — ");
+
+            return (
+              <div key={grupo.key} style={{ padding: "12px 14px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, marginBottom: 8 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#1e40af", marginBottom: 8 }}>{label}</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {grupo.arquivos.map((arq) => {
+                    const mantendo = grupo.manter.includes(arq.id);
+                    return (
+                      <label key={arq.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, color: mantendo ? "#1e40af" : "#9ca3af" }}>
+                        <input type="checkbox" checked={mantendo} onChange={() => toggleManter(grupo.key, arq.id)} style={{ cursor: "pointer" }} />
+                        <span style={{ textDecoration: mantendo ? "none" : "line-through" }}>{arq.nome_arquivo}</span>
+                        {mantendo && <span style={{ color: "#16a34a", fontWeight: 600 }}>manter</span>}
+                        {!mantendo && <span style={{ color: "#9ca3af" }}>descartar</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+                {grupo.manter.length === 0 && (
+                  <p style={{ fontSize: 11, color: "#c2410c", marginTop: 6 }}>⚠ Selecione ao menos 1 arquivo para manter.</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Arquivos sem tipo identificado */}
+      {arquivosSemTipo.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: "#d97706", marginBottom: 4 }}>
+            ? Não identificados ({arquivosSemTipo.length})
+          </h3>
+          <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+            A IA não conseguiu identificar o tipo destes arquivos. Classifique-os manualmente ou deixe em branco para enviar para a Fila Global.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {arquivosSemTipo.map((item) => (
+              <div key={item.arquivo.id} style={{ padding: "10px 12px", background: "#fefce8", border: "1px solid #fde68a", borderRadius: 8 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{item.arquivo.nome_arquivo}</p>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <select
+                    value={item.tipoSelecionado || ""}
+                    onChange={(e) => setTipo(item.arquivo.id, e.target.value || null)}
+                    style={{ flex: 1, padding: "5px 8px", border: "1px solid #d1d5db", borderRadius: 5, fontSize: 12, background: "white" }}
+                  >
+                    <option value="">— Selecionar tipo (opcional) —</option>
+                    {TIPOS_DOC.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                  {!item.tipoSelecionado && (
+                    <span style={{ fontSize: 11, color: "#7c3aed", flexShrink: 0 }}>→ Fila Global</span>
+                  )}
+                  {item.tipoSelecionado && (
+                    <span style={{ fontSize: 11, color: "#16a34a", flexShrink: 0 }}>→ Será salvo</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Resumo da fila global */}
+      {totalFilaGlobal > 0 && (
+        <div style={{ marginBottom: 24, padding: "10px 14px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 8, fontSize: 12, color: "#7c3aed" }}>
+          <strong>{totalFilaGlobal} arquivo{totalFilaGlobal !== 1 ? "s" : ""}</strong> irá{totalFilaGlobal !== 1 ? "o" : ""} para a Fila Global após o envio.
+          Acesse <Link href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>Fila Global</Link> para mover para a empresa certa ou excluir.
+        </div>
+      )}
+
+      {pertenceArquivos.length === 0 && naoPertenceArquivos.length === 0 && (
+        <div style={{ padding: 20, background: "#f0fdf4", borderRadius: 8, fontSize: 13, color: "#16a34a" }}>
+          Nenhum arquivo disponível para salvar.
+        </div>
+      )}
+
+      {/* Verificação: algum grupo de formato sem nenhum arquivo marcado */}
+      {gruposFormatos.some((g) => g.manter.length === 0) && (
+        <div style={{ padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, fontSize: 12, color: "#b91c1c", marginBottom: 12 }}>
+          ⚠ Em cada grupo de formatos duplicados, selecione ao menos 1 arquivo para manter.
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button
+          onClick={onConfirmar}
+          disabled={gruposFormatos.some((g) => g.manter.length === 0)}
+          style={{
+            padding: "10px 28px",
+            background: gruposFormatos.some((g) => g.manter.length === 0) ? "#e5e7eb" : "#c4a030",
+            color: gruposFormatos.some((g) => g.manter.length === 0) ? "#9ca3af" : "#0c1a2e",
+            border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14,
+            cursor: gruposFormatos.some((g) => g.manter.length === 0) ? "not-allowed" : "pointer",
+          }}
+        >
+          Confirmar e salvar →
+        </button>
+        <button onClick={onVoltar}
+          style={{ padding: "10px 18px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+          ← Voltar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── StepBar ────────────────────────────────────────────────────────────────
 
 function StepBar({ step }: { step: Step }) {
   const etapas = [
-    { keys: ["selecao", "scan_loading"],                         label: "1 · Selecionar" },
-    { keys: ["pre_classif", "confirm_loading", "resultados"],    label: "2 · Revisar e salvar" },
+    { keys: ["selecao", "scan_loading"],                                   label: "1 · Selecionar" },
+    { keys: ["contas_identificacao"],                                       label: "2 · Contas" },
+    { keys: ["arquivos_revisao", "confirm_loading", "resultado"],          label: "3 · Arquivos" },
   ];
-  const stepIdx = etapas.findIndex((e) => e.keys.includes(step));
+  const stepIdx = etapas.findIndex((e) => (e.keys as string[]).includes(step));
 
   return (
     <div style={{ display: "flex", gap: 0, marginBottom: 28, alignItems: "center" }}>
@@ -593,7 +895,7 @@ function StepBar({ step }: { step: Step }) {
   );
 }
 
-// ── Linha de resultado ─────────────────────────────────────────────────────
+// ── Resultado row ──────────────────────────────────────────────────────────
 
 function ResultadoRow({ resultado, onPreview, previewLoading }: {
   resultado: ResultadoFinal;
@@ -601,13 +903,12 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
   previewLoading: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
-
   const { status } = resultado;
   const cfg = ({
     classificado:          { icon: "✓",  color: "#16a34a", bg: "#f0fdf4",  label: "Classificado" },
     duplicata:             { icon: "⚠",  color: "#c2410c", bg: "#fff7ed",  label: "Duplicata" },
     nao_reconhecido:       { icon: "?",  color: "#d97706", bg: "#fefce8",  label: "Não identificado" },
-    aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff",  label: "Fila de espera" },
+    aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff",  label: "Fila Global" },
     baixado:               { icon: "⬇", color: "#6b7280", bg: "#f9fafb",  label: "Baixado" },
     erro:                  { icon: "✗",  color: "#b91c1c", bg: "#fef2f2",  label: "Erro" },
   } as Record<string, { icon: string; color: string; bg: string; label: string }>)[status]
@@ -620,24 +921,16 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
 
   return (
     <div style={{ background: cfg.bg, border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 14px" }}>
-      {/* Linha principal */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 14, color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 500, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {resultado.nome_arquivo}
           </span>
-          {/* Info do conflito visível sem expandir */}
           {status === "duplicata" && resultado.duplicata_nome_arquivo && (
             <span style={{ fontSize: 11, color: "#c2410c", display: "block", marginTop: 1 }}>
               Conflita com: <strong>{resultado.duplicata_nome_arquivo}</strong>
             </span>
-          )}
-          {status === "nao_reconhecido" && (
-            <span style={{ fontSize: 11, color: "#d97706" }}>Enviado para fila de revisão</span>
-          )}
-          {status === "aguardando_roteamento" && (
-            <span style={{ fontSize: 11, color: "#7c3aed" }}>Na fila de roteamento</span>
           )}
         </div>
         <span style={{ fontSize: 12, color: cfg.color, fontWeight: 600, flexShrink: 0 }}>{cfg.label}</span>
@@ -648,29 +941,23 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
             ⬇ Baixar
           </a>
         )}
-
         {podeVer && (
           <button onClick={() => onPreview(resultado.id)} disabled={isLoadingThis}
             style={{ padding: "3px 10px", background: "white", color: "#2563eb", border: "1px solid #2563eb", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: isLoadingThis ? "not-allowed" : "pointer", opacity: isLoadingThis ? 0.6 : 1, flexShrink: 0 }}>
             {isLoadingThis ? "…" : "👁 Ver"}
           </button>
         )}
-
         {status === "duplicata" && resultado.duplicata_de && (
           <button onClick={() => onPreview(resultado.duplicata_de!)} disabled={isLoadingOriginal}
-            title="Visualizar o arquivo que já estava salvo"
             style={{ padding: "3px 10px", background: "white", color: "#c2410c", border: "1px solid #c2410c", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: isLoadingOriginal ? "not-allowed" : "pointer", opacity: isLoadingOriginal ? 0.6 : 1, flexShrink: 0 }}>
             {isLoadingOriginal ? "…" : "👁 Original"}
           </button>
         )}
-
         <button onClick={() => setExpanded((v) => !v)}
           style={{ fontSize: 11, color: "#6b7280", background: "transparent", border: "1px solid #d1d5db", borderRadius: 4, padding: "2px 8px", cursor: "pointer", flexShrink: 0 }}>
           {expanded ? "▲" : "▼"}
         </button>
       </div>
-
-      {/* Detalhes expandidos — apenas informacionais */}
       {expanded && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px" }}>
@@ -679,15 +966,7 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
             {resultado.conta && <Detail label="Conta" value={resultado.conta} />}
             {resultado.mes_referencia && <Detail label="Mês" value={_mesPtBR(resultado.mes_referencia)} />}
             {resultado.nome_sugerido && <Detail label="Nome sugerido" value={resultado.nome_sugerido} highlight />}
-            {status === "duplicata" && resultado.duplicata_nome_arquivo && (
-              <Detail label="Conflita com" value={resultado.duplicata_nome_arquivo} />
-            )}
           </div>
-          {(status === "duplicata" || status === "nao_reconhecido") && (
-            <p style={{ marginTop: 8, fontSize: 11, color: "#6b7280" }}>
-              Para resolver este item, acesse a <strong>Fila de revisão</strong> na página da empresa.
-            </p>
-          )}
         </div>
       )}
     </div>
@@ -723,8 +1002,7 @@ function PreviewModal({ url, nome, onClose }: { url: string; nome: string; onClo
   );
 }
 
-// ── Sub-componentes ────────────────────────────────────────────────────────
-
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 function Detail({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
@@ -734,9 +1012,6 @@ function Detail({ label, value, highlight }: { label: string; value: string; hig
     </div>
   );
 }
-
-const lbl: React.CSSProperties = { display: "block", fontSize: 11, color: "#6b7280", marginBottom: 3, fontWeight: 500 };
-const inp: React.CSSProperties = { width: "100%", padding: "5px 8px", border: "1px solid #d1d5db", borderRadius: 5, fontSize: 12, background: "white", boxSizing: "border-box" };
 
 const _MESES: Record<string, string> = {
   "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",

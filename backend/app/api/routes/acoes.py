@@ -45,6 +45,24 @@ def listar_acoes(empresa_id: UUID, limit: int = 50):
         return []
 
 
+@router.get("/fila-global")
+def fila_global():
+    """Todos os documentos aguardando roteamento (fila global, sem destino definido)."""
+    supabase = get_supabase()
+    try:
+        res = (
+            supabase.schema("gestao_docs").from_("documento")
+            .select("*, empresa:empresa_id(id,nome,codigo)")
+            .eq("status", "aguardando_roteamento")
+            .is_("excluido_em", None)
+            .order("detectado_em", desc=True)
+            .execute()
+        )
+        return res.data or []
+    except Exception:
+        return []
+
+
 @router.get("/empresas/{empresa_id}/revisao-pendente")
 def revisao_pendente(empresa_id: UUID):
     """Documentos que precisam de ação: nao_reconhecido, empresa_errada, duplicata, aguardando_roteamento."""

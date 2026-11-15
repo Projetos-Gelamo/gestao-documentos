@@ -264,6 +264,7 @@ class ConfirmarItem(BaseModel):
     documento_id: str
     acao: str  # "salvar_aqui" | "fila_espera" | "baixar"
     is_nova_conta: bool = False  # se True e acao=salvar_aqui, cria tipo_esperado
+    allow_format_duplicate: bool = False  # se True, pula checagem de duplicata (formatos intencionais)
 
 class ConfirmarRequest(BaseModel):
     empresa_id: str          # empresa atual (para "salvar_aqui")
@@ -521,7 +522,7 @@ async def confirmar_upload(body: ConfirmarRequest):
         duplicata_de = None
         final_status = "classificado"
 
-        if tipo and mes_ref:
+        if tipo and mes_ref and not item.allow_format_duplicate:
             try:
                 q = (
                     supabase.schema("gestao_docs").from_("documento")
