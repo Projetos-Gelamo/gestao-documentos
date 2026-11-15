@@ -343,7 +343,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       {step === "pre_classif" && (
         <div>
           <p style={{ fontSize: 13, color: "#374151", marginBottom: 20 }}>
-            A IA analisou os arquivos. <strong>Decida o destino</strong> dos itens abaixo — após confirmar, o sistema salva e exibe o resultado.
+            A IA analisou os arquivos. <strong>Decida o destino</strong> dos itens marcados — os demais serão salvos automaticamente. Clique em <strong>Confirmar e salvar</strong> para finalizar.
           </p>
 
           {(gruposDecisao.length > 0 || naoReconhecidos.length > 0) && (
@@ -381,20 +381,20 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
           )}
 
           {gruposConfirmados.length > 0 && (
-            <div style={{ marginBottom: 24 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: "#16a34a", marginBottom: 10 }}>
-                ✓ Contas conhecidas desta empresa — salvos automaticamente ({gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0)} arq.)
-              </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <details style={{ marginBottom: 24 }}>
+              <summary style={{ fontSize: 13, fontWeight: 600, color: "#16a34a", cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", gap: 6, padding: "8px 0", borderTop: "1px solid #e5e7eb" }}>
+                ▶ {gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0)} arquivo{gruposConfirmados.reduce((s, g) => s + g.documentos.length, 0) !== 1 ? "s" : ""} prontos para salvar — clique para ver
+              </summary>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                 {gruposConfirmados.map((grupo) => (
-                  <div key={grupo.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 13 }}>
+                  <div key={grupo.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 12 }}>
                     <span style={{ color: "#16a34a", fontWeight: 600, flexShrink: 0 }}>✓</span>
-                    <span style={{ flex: 1 }}>{grupo.label}</span>
+                    <span style={{ flex: 1, color: "#374151" }}>{grupo.label}</span>
                     <span style={{ fontSize: 11, color: "#6b7280" }}>{grupo.documentos.length} arq.</span>
                   </div>
                 ))}
               </div>
-            </div>
+            </details>
           )}
 
           {comErro.length > 0 && (
@@ -437,27 +437,33 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         </div>
       )}
 
-      {/* ── Etapa 3: Resultados ── */}
+      {/* ── Resultado inline (mesmo passo visual) ── */}
       {step === "resultados" && (
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {[
-                { key: "classificado",          icon: "✓",  label: "classificado", color: "#16a34a" },
-                { key: "duplicata",             icon: "⚠",  label: "duplicata",    color: "#c2410c" },
-                { key: "aguardando_roteamento", icon: "📋", label: "na fila",       color: "#7c3aed" },
-                { key: "baixado",               icon: "⬇", label: "baixado",       color: "#6b7280" },
-              ].map(({ key, icon, label, color }) => {
-                const n = finalResults.filter((r) => r.status === key).length;
-                return n > 0 ? (
-                  <span key={key} style={{ fontSize: 13, color, fontWeight: 600 }}>
-                    {icon} {n} {label}{n !== 1 ? "s" : ""}
-                  </span>
-                ) : null;
-              })}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <div>
+              <p style={{ fontSize: 13, color: "#374151", marginBottom: 10 }}>
+                Envio concluído. Veja abaixo o resultado de cada arquivo.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[
+                  { key: "classificado",          label: "classificado",  bg: "#f0fdf4", color: "#16a34a", border: "#bbf7d0" },
+                  { key: "duplicata",             label: "duplicata",     bg: "#fff7ed", color: "#c2410c", border: "#fed7aa" },
+                  { key: "aguardando_roteamento", label: "na fila",        bg: "#faf5ff", color: "#7c3aed", border: "#ddd6fe" },
+                  { key: "nao_reconhecido",       label: "não identificado", bg: "#fefce8", color: "#d97706", border: "#fde68a" },
+                  { key: "baixado",               label: "baixado",       bg: "#f9fafb", color: "#6b7280", border: "#e5e7eb" },
+                ].map(({ key, label, bg, color, border }) => {
+                  const n = finalResults.filter((r) => r.status === key).length;
+                  return n > 0 ? (
+                    <span key={key} style={{ fontSize: 12, fontWeight: 600, color, background: bg, border: `1px solid ${border}`, borderRadius: 20, padding: "3px 10px" }}>
+                      {n} {label}{n !== 1 ? "s" : ""}
+                    </span>
+                  ) : null;
+                })}
+              </div>
             </div>
             <button onClick={resetar}
-              style={{ padding: "7px 16px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              style={{ padding: "8px 18px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", flexShrink: 0, marginLeft: 12 }}>
               + Enviar mais
             </button>
           </div>
@@ -559,9 +565,8 @@ function DecisaoCard({ grupo, acaoSelecionada, onAcao }: {
 
 function StepBar({ step }: { step: Step }) {
   const etapas = [
-    { keys: ["selecao", "scan_loading"],        label: "1 · Selecionar" },
-    { keys: ["pre_classif", "confirm_loading"],  label: "2 · Rotear" },
-    { keys: ["resultados"],                      label: "3 · Resultado" },
+    { keys: ["selecao", "scan_loading"],                         label: "1 · Selecionar" },
+    { keys: ["pre_classif", "confirm_loading", "resultados"],    label: "2 · Revisar e salvar" },
   ];
   const stepIdx = etapas.findIndex((e) => e.keys.includes(step));
 
