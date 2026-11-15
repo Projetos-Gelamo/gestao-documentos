@@ -46,7 +46,7 @@ class PeriodicidadeDocumento(str, Enum):
 
 class EmpresaBase(BaseModel):
     codigo: str
-    cnpj: str
+    cnpj: str | None = None
     nome: str
     pasta_id_drive: str | None = None
     ficticio: bool = False
