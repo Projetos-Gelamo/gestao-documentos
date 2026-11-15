@@ -140,6 +140,15 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
     onRefresh();
   }
 
+  async function toggleAtivo(id: string, ativoAtual: boolean) {
+    await fetch(`${API}/empresas/${empresaId}/contas-bancarias/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ativo: !ativoAtual }),
+    });
+    onRefresh();
+  }
+
   async function importar(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     setImportando(true);
@@ -249,19 +258,32 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {contas.map((c) => (
           <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px",
-            background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+            background: c.ativo === false ? "#f9fafb" : "#fff",
+            border: `1px solid ${c.ativo === false ? "#e5e7eb" : "#e5e7eb"}`,
+            borderRadius: 10, opacity: c.ativo === false ? 0.7 : 1 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{c.banco}</span>
                 <Badge color="blue">{TIPO_LABEL[c.tipo] ?? c.tipo}</Badge>
                 {c.descricao && <span style={{ fontSize: 12, color: "#374151", fontStyle: "italic" }}>{c.descricao}</span>}
-                {!c.ativo && <Badge color="gray">Inativa</Badge>}
+                {c.ativo === false && <Badge color="gray">Inativa</Badge>}
               </div>
               <span style={{ fontSize: 12, color: "#6b7280" }}>
                 {c.agencia ? `Ag. ${c.agencia} · ` : ""}CC: {c.conta}{c.cnpj ? ` · CNPJ: ${c.cnpj}` : ""}
               </span>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button
+                onClick={() => toggleAtivo(c.id, c.ativo !== false)}
+                style={{
+                  padding: "4px 10px", borderRadius: 6, border: "1px solid", fontSize: 11,
+                  fontWeight: 600, cursor: "pointer",
+                  background: c.ativo === false ? "#f0fdf4" : "#fef9ec",
+                  borderColor: c.ativo === false ? "#bbf7d0" : "#fde68a",
+                  color: c.ativo === false ? "#15803d" : "#b45309",
+                }}>
+                {c.ativo === false ? "Reativar" : "Inativar"}
+              </button>
               <BtnIcon onClick={() => setForm({ ...c })} />
               <BtnIcon onClick={() => deletar(c.id)} danger />
             </div>
@@ -418,7 +440,7 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
             <Field label="Conta vinculada (opcional)">
               <select value={form.conta_bancaria_id ?? ""} onChange={(e) => setForm({ ...form, conta_bancaria_id: e.target.value || null })} style={inputStyle}>
                 <option value="">— Sem conta vinculada —</option>
-                {contas.map((c) => (
+                {contas.filter((c) => c.ativo !== false).map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.banco} CC {c.conta}{c.descricao ? ` — ${c.descricao}` : ""}
                   </option>

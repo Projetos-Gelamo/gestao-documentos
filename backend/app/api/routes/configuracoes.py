@@ -140,6 +140,14 @@ def atualizar_conta(empresa_id: UUID, conta_id: UUID, body: ContaBancariaUpdate)
             .eq("empresa_id", str(empresa_id))
             .execute()
         )
+        # Cascateia ativo para documento_esperado vinculado
+        if "ativo" in updates:
+            try:
+                supabase.schema("gestao_docs").from_("documento_esperado").update(
+                    {"ativo": updates["ativo"]}
+                ).eq("conta_bancaria_id", str(conta_id)).execute()
+            except Exception as exc_doc:
+                logger.warning("atualizar_conta: falha ao cascatear ativo para docs: %s", exc_doc)
         return res.data[0] if res.data else {}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
