@@ -275,16 +275,19 @@ async def preview_importar_contas(empresa_id: UUID, file: UploadFile = File(...)
     except Exception:
         empresas = []
 
-    def _find_empresa(cnpj_planilha: str | None) -> tuple[str, str]:
+    def _find_empresa(cnpj_planilha: str | None) -> tuple[str, str, bool]:
+        """Returns (empresa_id_destino, empresa_nome_destino, cnpj_desconhecido)."""
         norm = _norm_cnpj(cnpj_planilha)
         if norm:
             for emp in empresas:
                 if _norm_cnpj(emp.get("cnpj")) == norm:
-                    return emp["id"], emp.get("nome") or emp["id"]
+                    return emp["id"], emp.get("nome") or emp["id"], False
+            # CNPJ fornecido mas não encontrado no sistema — avisa o usuário
+            return str(empresa_id), f"CNPJ {cnpj_planilha} (empresa não cadastrada)", True
         return str(empresa_id), next(
             (emp.get("nome") or emp["id"] for emp in empresas if emp["id"] == str(empresa_id)),
             str(empresa_id),
-        )
+        ), False
 
     items: list[ContaPreviewItem] = []
     for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
@@ -298,11 +301,11 @@ async def preview_importar_contas(empresa_id: UUID, file: UploadFile = File(...)
         if not banco or not conta:
             continue
         tipo = tipo_raw if tipo_raw in ("corrente", "poupanca", "investimento", "conta_garantida") else "corrente"
-        emp_id, emp_nome = _find_empresa(cnpj)
+        emp_id, emp_nome, cnpj_desconhecido = _find_empresa(cnpj)
         items.append(ContaPreviewItem(
             linha=idx, banco=banco, agencia=agencia, conta=conta, tipo=tipo, cnpj=cnpj,
             empresa_id_destino=emp_id, empresa_nome_destino=emp_nome,
-            diferente=(emp_id != str(empresa_id)),
+            diferente=(emp_id != str(empresa_id)) or cnpj_desconhecido,
         ))
     return items
 
