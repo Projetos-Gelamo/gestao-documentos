@@ -259,16 +259,34 @@ async def importar_contas(empresa_id: UUID, file: UploadFile = File(...)):
                 continue
 
             tipo = tipo_raw if tipo_raw in ("corrente", "poupanca", "investimento") else "corrente"
+            descricao = str(row[5] or "").strip() or None if len(row) > 5 else None
 
-            supabase.schema("gestao_docs").from_("conta_bancaria").insert({
+            res_conta = supabase.schema("gestao_docs").from_("conta_bancaria").insert({
                 "empresa_id": str(empresa_id),
                 "banco": banco,
                 "agencia": agencia,
                 "conta": conta,
                 "tipo": tipo,
                 "cnpj": cnpj,
+                "descricao": descricao,
             }).execute()
             inseridos += 1
+            conta_id = (res_conta.data or [{}])[0].get("id")
+            if conta_id:
+                desc_parts = [f"Extrato {banco} CC {conta}"]
+                if descricao:
+                    desc_parts.append(descricao)
+                try:
+                    supabase.schema("gestao_docs").from_("documento_esperado").insert({
+                        "empresa_id": str(empresa_id),
+                        "conta_bancaria_id": conta_id,
+                        "tipo": "extrato_bancario",
+                        "descricao": " — ".join(desc_parts),
+                        "frequencia": "mensal",
+                        "ativo": True,
+                    }).execute()
+                except Exception:
+                    pass
         except Exception as exc:
             erros.append(f"Linha {idx}: {exc}")
 
@@ -342,14 +360,19 @@ async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmar
     supabase = get_supabase()
 
     # Carrega contas existentes de todas as empresas destino para deduplicar
+    # Chave: (empresa_id, conta, descricao) — permite mesma conta com descrições diferentes
     dest_ids = list({item.empresa_id_destino for item in items})
-    existing_keys: set[tuple[str, str]] = set()
+    existing_keys: set[tuple[str, str, str]] = set()
     for eid in dest_ids:
         try:
             res = (supabase.schema("gestao_docs").from_("conta_bancaria")
-                   .select("empresa_id,conta").eq("empresa_id", eid).execute())
+                   .select("empresa_id,conta,descricao").eq("empresa_id", eid).execute())
             for row in res.data or []:
-                existing_keys.add((row["empresa_id"], (row["conta"] or "").strip()))
+                existing_keys.add((
+                    row["empresa_id"],
+                    (row["conta"] or "").strip(),
+                    (row.get("descricao") or "").strip(),
+                ))
         except Exception:
             pass
 
@@ -357,12 +380,12 @@ async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmar
     ignorados = 0
     erros: list[str] = []
     for item in items:
-        key = (item.empresa_id_destino, item.conta.strip())
+        key = (item.empresa_id_destino, item.conta.strip(), (item.descricao or "").strip())
         if key in existing_keys:
             ignorados += 1
             continue
         try:
-            supabase.schema("gestao_docs").from_("conta_bancaria").insert({
+            res_conta = supabase.schema("gestao_docs").from_("conta_bancaria").insert({
                 "empresa_id": item.empresa_id_destino,
                 "banco": item.banco,
                 "agencia": item.agencia,
@@ -373,6 +396,23 @@ async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmar
             }).execute()
             inseridos += 1
             existing_keys.add(key)
+            # Auto-cria documento_esperado extrato mensal (igual ao criar_conta)
+            conta_id = (res_conta.data or [{}])[0].get("id")
+            if conta_id:
+                desc_parts = [f"Extrato {item.banco} CC {item.conta}"]
+                if item.descricao:
+                    desc_parts.append(item.descricao)
+                try:
+                    supabase.schema("gestao_docs").from_("documento_esperado").insert({
+                        "empresa_id": item.empresa_id_destino,
+                        "conta_bancaria_id": conta_id,
+                        "tipo": "extrato_bancario",
+                        "descricao": " — ".join(desc_parts),
+                        "frequencia": "mensal",
+                        "ativo": True,
+                    }).execute()
+                except Exception:
+                    pass
         except Exception as exc:
             err_str = str(exc)
             if "tipo_check" in err_str or ("tipo" in err_str and "check" in err_str):
