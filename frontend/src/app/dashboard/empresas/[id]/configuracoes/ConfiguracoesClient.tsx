@@ -21,6 +21,12 @@ const TIPOS_DOC = [
 
 type Empresa = { id: string; nome: string; cnpj: string; codigo: string };
 
+type PreviewItem = {
+  linha: number; banco: string; agencia: string | null; conta: string;
+  tipo: string; cnpj: string | null;
+  empresa_id_destino: string; empresa_nome_destino: string; diferente: boolean;
+};
+
 type ContaBancaria = {
   id: string; banco: string; agencia: string | null;
   conta: string; tipo: string; cnpj: string | null; ativo: boolean;
@@ -132,6 +138,7 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
   const [form, setForm] = useState<Partial<ContaBancaria> | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [importando, setImportando] = useState(false);
+  const [preview, setPreview] = useState<PreviewItem[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function salvar() {
@@ -159,11 +166,30 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
     setImportando(true);
     const fd = new FormData(); fd.append("file", f);
     try {
-      const r = await fetch(`${API}/empresas/${empresaId}/importar-contas`, { method: "POST", body: fd });
+      const r = await fetch(`${API}/empresas/${empresaId}/preview-importar-contas`, { method: "POST", body: fd });
+      if (!r.ok) { alert("Erro ao ler planilha."); return; }
+      const items: PreviewItem[] = await r.json();
+      if (items.length === 0) { alert("Nenhuma linha válida encontrada na planilha."); return; }
+      setPreview(items);
+    } finally { setImportando(false); if (fileRef.current) fileRef.current.value = ""; }
+  }
+
+  async function confirmarImport(items: PreviewItem[]) {
+    setImportando(true);
+    try {
+      const r = await fetch(`${API}/empresas/${empresaId}/confirmar-importar-contas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(items.map((i) => ({
+          empresa_id_destino: i.empresa_id_destino,
+          banco: i.banco, agencia: i.agencia, conta: i.conta, tipo: i.tipo, cnpj: i.cnpj,
+        }))),
+      });
       const d = await r.json();
       alert(`Importadas: ${d.inseridos} contas.${d.erros?.length ? `\nErros: ${d.erros.join("\n")}` : ""}`);
+      setPreview(null);
       onRefresh();
-    } finally { setImportando(false); if (fileRef.current) fileRef.current.value = ""; }
+    } finally { setImportando(false); }
   }
 
   const TIPO_LABEL: Record<string, string> = { corrente: "Corrente", poupanca: "Poupança", investimento: "Investimento" };
@@ -254,6 +280,49 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
           <EmptyState>Nenhuma conta cadastrada. Adicione manualmente ou importe uma planilha.</EmptyState>
         )}
       </div>
+
+      {/* Modal de preview de importação */}
+      {preview && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 24, maxWidth: 640, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <p style={{ fontSize: 16, fontWeight: 700, color: "#0c1a2e", margin: 0 }}>Confirmar importação</p>
+              <p style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
+                {preview.length} conta{preview.length !== 1 ? "s" : ""} encontrada{preview.length !== 1 ? "s" : ""}.
+                {preview.some((i) => i.diferente) && (
+                  <span style={{ color: "#b45309", fontWeight: 600 }}> Atenção: há contas de outra empresa — verifique antes de confirmar.</span>
+                )}
+              </p>
+            </div>
+
+            <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+              {preview.map((item) => (
+                <div key={item.linha} style={{
+                  padding: "8px 12px", borderRadius: 8,
+                  background: item.diferente ? "#fffbeb" : "#f9fafb",
+                  border: `1px solid ${item.diferente ? "#fcd34d" : "#e5e7eb"}`,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{item.banco}</span>
+                    <Badge color={item.diferente ? "yellow" : "blue"}>{item.tipo}</Badge>
+                    {item.diferente && <Badge color="yellow">⚠ {item.empresa_nome_destino}</Badge>}
+                  </div>
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>
+                    {item.agencia ? `Ag. ${item.agencia} · ` : ""}CC: {item.conta}{item.cnpj ? ` · CNPJ: ${item.cnpj}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", paddingTop: 4 }}>
+              <BtnSecondary onClick={() => setPreview(null)}>Cancelar</BtnSecondary>
+              <BtnPrimary onClick={() => confirmarImport(preview)} loading={importando}>
+                Confirmar e salvar
+              </BtnPrimary>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -485,12 +554,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Badge({ color, children }: { color: "blue" | "amber" | "gray" | "green"; children: React.ReactNode }) {
+function Badge({ color, children }: { color: "blue" | "amber" | "gray" | "green" | "yellow"; children: React.ReactNode }) {
   const styles = {
-    blue:  { background: "#eff6ff", color: "#1e40af" },
-    amber: { background: "#fef3c7", color: "#92400e" },
-    gray:  { background: "#f3f4f6", color: "#6b7280" },
-    green: { background: "#f0fdf4", color: "#166534" },
+    blue:   { background: "#eff6ff", color: "#1e40af" },
+    amber:  { background: "#fef3c7", color: "#92400e" },
+    gray:   { background: "#f3f4f6", color: "#6b7280" },
+    green:  { background: "#f0fdf4", color: "#166534" },
+    yellow: { background: "#fef9c3", color: "#854d0e" },
   }[color];
   return (
     <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 20, fontWeight: 600, ...styles }}>

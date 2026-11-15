@@ -19,6 +19,12 @@ TIPOS_DOC = [
 
 # ── Modelos ────────────────────────────────────────────────────────────────
 
+def _norm_cnpj(cnpj: str | None) -> str:
+    if not cnpj:
+        return ""
+    return "".join(c for c in str(cnpj) if c.isdigit())
+
+
 class ContaBancariaIn(BaseModel):
     banco: str
     agencia: str | None = None
@@ -41,6 +47,25 @@ class DocumentoEsperadoIn(BaseModel):
     descricao: str
     frequencia: str = "mensal"
     ativo: bool = True
+
+class ContaPreviewItem(BaseModel):
+    linha: int
+    banco: str
+    agencia: str | None
+    conta: str
+    tipo: str
+    cnpj: str | None
+    empresa_id_destino: str
+    empresa_nome_destino: str
+    diferente: bool
+
+class ContaConfirmarItem(BaseModel):
+    empresa_id_destino: str
+    banco: str
+    agencia: str | None = None
+    conta: str
+    tipo: str = "corrente"
+    cnpj: str | None = None
 
 class DocumentoEsperadoUpdate(BaseModel):
     conta_bancaria_id: str | None = None
@@ -222,6 +247,85 @@ async def importar_contas(empresa_id: UUID, file: UploadFile = File(...)):
         except Exception as exc:
             erros.append(f"Linha {idx}: {exc}")
 
+    return {"inseridos": inseridos, "erros": erros}
+
+
+@router.post("/empresas/{empresa_id}/preview-importar-contas")
+async def preview_importar_contas(empresa_id: UUID, file: UploadFile = File(...)):
+    """
+    Lê a planilha e retorna preview com a empresa destino de cada linha (sem salvar).
+    Cruza o CNPJ da planilha com as empresas cadastradas no sistema.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl não instalado")
+
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb.active
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Erro ao ler planilha: {exc}")
+
+    supabase = get_supabase()
+    try:
+        empresas = (supabase.schema("gestao_docs").from_("empresa")
+                    .select("id,nome_razao_social,cnpj").execute()).data or []
+    except Exception:
+        empresas = []
+
+    def _find_empresa(cnpj_planilha: str | None) -> tuple[str, str]:
+        norm = _norm_cnpj(cnpj_planilha)
+        if norm:
+            for emp in empresas:
+                if _norm_cnpj(emp.get("cnpj")) == norm:
+                    return emp["id"], emp.get("nome_razao_social") or emp["id"]
+        return str(empresa_id), next(
+            (emp.get("nome_razao_social") or emp["id"] for emp in empresas if emp["id"] == str(empresa_id)),
+            str(empresa_id),
+        )
+
+    items: list[ContaPreviewItem] = []
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not any(row):
+            continue
+        banco = str(row[0] or "").strip()
+        agencia = str(row[1] or "").strip() or None
+        conta = str(row[2] or "").strip()
+        tipo_raw = str(row[3] or "corrente").strip().lower().replace(" ", "_")
+        cnpj = str(row[4] or "").strip() or None
+        if not banco or not conta:
+            continue
+        tipo = tipo_raw if tipo_raw in ("corrente", "poupanca", "investimento", "conta_garantida") else "corrente"
+        emp_id, emp_nome = _find_empresa(cnpj)
+        items.append(ContaPreviewItem(
+            linha=idx, banco=banco, agencia=agencia, conta=conta, tipo=tipo, cnpj=cnpj,
+            empresa_id_destino=emp_id, empresa_nome_destino=emp_nome,
+            diferente=(emp_id != str(empresa_id)),
+        ))
+    return items
+
+
+@router.post("/empresas/{empresa_id}/confirmar-importar-contas", status_code=201)
+async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmarItem]):
+    """Salva contas confirmadas pelo usuário, cada uma na empresa destino resolvida."""
+    supabase = get_supabase()
+    inseridos = 0
+    erros: list[str] = []
+    for item in items:
+        try:
+            supabase.schema("gestao_docs").from_("conta_bancaria").insert({
+                "empresa_id": item.empresa_id_destino,
+                "banco": item.banco,
+                "agencia": item.agencia,
+                "conta": item.conta,
+                "tipo": item.tipo,
+                "cnpj": item.cnpj,
+            }).execute()
+            inseridos += 1
+        except Exception as exc:
+            erros.append(str(exc))
     return {"inseridos": inseridos, "erros": erros}
 
 
