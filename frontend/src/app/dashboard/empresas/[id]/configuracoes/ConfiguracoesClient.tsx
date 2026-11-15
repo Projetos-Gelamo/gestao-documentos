@@ -184,7 +184,12 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
           <BtnPrimary onClick={() => setForm({ tipo: "corrente", ativo: true })}>+ Adicionar conta</BtnPrimary>
         </div>
       </div>
-      <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16 }}>Formato da planilha: Banco | Agência | Conta | Tipo | CNPJ</p>
+      <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
+        Formato da planilha: Banco | Agência | Conta | Tipo | CNPJ{" — "}
+        <a href={`${API}/templates/contas-bancarias.xlsx`} download style={{ color: "#2563eb" }}>
+          ⬇ Baixar modelo
+        </a>
+      </p>
 
       {form !== null && (
         <div style={{ padding: 16, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 16 }}>
@@ -311,7 +316,12 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
           <BtnPrimary onClick={() => setForm({ tipo: "extrato_bancario", frequencia: "mensal", ativo: true })}>+ Adicionar</BtnPrimary>
         </div>
       </div>
-      <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 16 }}>Formato da planilha: Tipo | Banco | Conta | Descrição | Frequência</p>
+      <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
+        Formato da planilha: Tipo | Banco | Agência | Conta | Descrição | Frequência{" — "}
+        <a href={`${API}/templates/documentos-esperados.xlsx`} download style={{ color: "#2563eb" }}>
+          ⬇ Baixar modelo
+        </a>
+      </p>
 
       {form !== null && (
         <div style={{ padding: 16, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 16 }}>

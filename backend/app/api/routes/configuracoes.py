@@ -3,6 +3,7 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.supabase import get_supabase
@@ -268,9 +269,15 @@ async def importar_documentos(empresa_id: UUID, file: UploadFile = File(...)):
         try:
             tipo = str(row[0] or "").strip().lower().replace(" ", "_")
             banco = str(row[1] or "").strip()
-            conta = str(row[2] or "").strip()
-            descricao = str(row[3] or "").strip()
-            freq_raw = str(row[4] or "mensal").strip().lower()
+            # suporta planilha com 5 colunas (sem agencia) ou 6 colunas (com agencia)
+            if len(row) >= 6 and row[2] is not None and str(row[2]).strip():
+                conta = str(row[3] or "").strip()
+                descricao = str(row[4] or "").strip()
+                freq_raw = str(row[5] or "mensal").strip().lower()
+            else:
+                conta = str(row[2] or "").strip()
+                descricao = str(row[3] or "").strip()
+                freq_raw = str(row[4] or "mensal").strip().lower()
 
             if tipo not in TIPOS_DOC:
                 erros.append(f"Linha {idx}: tipo '{tipo}' inválido")
@@ -371,3 +378,63 @@ def pendencias_mes(empresa_id: UUID, ano: int, mes: int):
         })
 
     return result
+
+
+# ── Templates para download ────────────────────────────────────────────────
+
+def _make_xlsx(headers: list[str], example_row: list) -> bytes:
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl não instalado")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(fill_type="solid", fgColor="2563EB")
+
+    for col, value in enumerate(example_row, 1):
+        ws.cell(row=2, column=col, value=value)
+
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 22
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
+@router.get("/templates/contas-bancarias.xlsx")
+def template_contas():
+    headers = ["Banco", "Agência", "Conta", "Tipo", "CNPJ"]
+    example = ["Banco do Brasil", "0001-9", "12345-6", "corrente", "00.000.000/0001-00"]
+    content = _make_xlsx(headers, example)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=modelo_contas_bancarias.xlsx"},
+    )
+
+
+@router.get("/templates/documentos-esperados.xlsx")
+def template_documentos():
+    headers = ["Tipo", "Banco", "Agência", "Conta", "Descrição", "Frequência"]
+    example = [
+        "extrato_bancario",
+        "Banco do Brasil",
+        "0001-9",
+        "12345-6",
+        "Extrato conta corrente BB",
+        "mensal",
+    ]
+    content = _make_xlsx(headers, example)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=modelo_documentos_esperados.xlsx"},
+    )
