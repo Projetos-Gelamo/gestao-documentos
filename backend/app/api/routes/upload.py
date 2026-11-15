@@ -306,23 +306,28 @@ async def scan_upload(
     except Exception:
         pass
 
-    # Lookup global: banco+conta → (empresa_id, empresa_nome) para contas de OUTRAS empresas
+    # Lookup global: conta_bancaria de OUTRAS empresas → sugere empresa certa no scan
+    # Chave dupla: "banco|conta_digits" (exato) e "|conta_digits" (fallback se banco difere)
     conta_empresa_map: dict[str, tuple[str, str | None]] = {}
     try:
         cb_res = (
             supabase.schema("gestao_docs").from_("conta_bancaria")
-            .select("banco,conta,empresa_id,empresa:empresa_id(nome)")
+            .select("banco,conta,empresa_id")
             .neq("empresa_id", empresa_id)
             .execute()
         )
+        emp_nome_map = {e["id"]: e.get("nome") for e in empresas_cache}
         for cb in (cb_res.data or []):
             b = (cb.get("banco") or "").lower().strip()
             c = re.sub(r"[^\d]", "", cb.get("conta") or "")
-            if b and c:
-                emp = cb.get("empresa") or {}
-                conta_empresa_map[f"{b}|{c}"] = (cb["empresa_id"], emp.get("nome"))
-    except Exception:
-        pass
+            eid = cb.get("empresa_id", "")
+            nome = emp_nome_map.get(eid)
+            if c:
+                conta_empresa_map[f"{b}|{c}"] = (eid, nome)
+                # Chave só por conta (fallback quando nome do banco varia entre PDF e BD)
+                conta_empresa_map.setdefault(f"|{c}", (eid, nome))
+    except Exception as exc:
+        logger.warning("upload scan: falha ao carregar conta_empresa_map: %s", exc)
 
     results = []
 
@@ -364,10 +369,12 @@ async def scan_upload(
                     break
 
         # Se CNPJ não identificou outra empresa, tenta pelo banco+conta cadastrado
-        if empresa_sugerida_id == empresa_id and result.banco and result.conta:
-            b = result.banco.lower().strip()
+        if empresa_sugerida_id == empresa_id and result.conta:
+            b = (result.banco or "").lower().strip()
             c = re.sub(r"[^\d]", "", result.conta)
-            match = conta_empresa_map.get(f"{b}|{c}")
+            match = conta_empresa_map.get(f"{b}|{c}") if b else None
+            if not match:
+                match = conta_empresa_map.get(f"|{c}")
             if match:
                 empresa_sugerida_id, empresa_sugerida_nome = match
 
