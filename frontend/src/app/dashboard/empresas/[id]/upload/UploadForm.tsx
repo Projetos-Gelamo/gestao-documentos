@@ -1,5 +1,5 @@
 "use client";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
@@ -79,6 +79,21 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [acoesFinal, setAcoesFinal] = useState<Record<string, string | null>>({});
   const [scanErroGeral, setScanErroGeral] = useState<string | null>(null);
+  const [empresasErro, setEmpresasErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${API}/empresas`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data: any[]) => {
+        setAllEmpresas(data.map((e) => ({ id: e.id, nome: e.nome, cnpj: e.cnpj ?? null })));
+      })
+      .catch((err) => {
+        setEmpresasErro(`Não foi possível carregar a lista de empresas: ${err.message}`);
+      });
+  }, []);
 
   function addFiles(files: FileList | File[]) {
     setSelectedFiles((prev) => [...prev, ...Array.from(files)]);
@@ -88,15 +103,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     if (!selectedFiles.length) return;
     setStep("scan_loading");
     setScanErroGeral(null);
-
-    // Busca todas as empresas para o dropdown de pré-classificação
-    try {
-      const r = await fetch(`${API}/empresas`);
-      if (r.ok) {
-        const data = await r.json();
-        setAllEmpresas(data.map((e: any) => ({ id: e.id, nome: e.nome, cnpj: e.cnpj ?? null })));
-      }
-    } catch {}
 
     const form = new FormData();
     form.append("empresa_id", empresaId);
@@ -231,6 +237,12 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
       {/* Indicador de etapas */}
       <StepBar step={step} />
+
+      {empresasErro && (
+        <div style={{ marginBottom: 12, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, fontSize: 13, color: "#b91c1c" }}>
+          ✗ {empresasErro}
+        </div>
+      )}
 
       {/* ── Etapa 1: Seleção ── */}
       {(step === "selecao" || step === "scan_loading") && (
