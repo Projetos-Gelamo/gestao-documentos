@@ -186,7 +186,10 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
         }))),
       });
       const d = await r.json();
-      alert(`Importadas: ${d.inseridos} contas.${d.erros?.length ? `\nErros: ${d.erros.join("\n")}` : ""}`);
+      const msg = d.erros?.length
+        ? `${d.inseridos} conta(s) salva(s) com sucesso.\n\n${d.erros.length} erro(s):\n• ${d.erros.join("\n• ")}`
+        : `${d.inseridos} conta(s) importada(s) com sucesso.`;
+      alert(msg);
       setPreview(null);
       onRefresh();
     } finally { setImportando(false); }

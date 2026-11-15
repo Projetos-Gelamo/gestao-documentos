@@ -328,7 +328,13 @@ async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmar
             }).execute()
             inseridos += 1
         except Exception as exc:
-            erros.append(str(exc))
+            err_str = str(exc)
+            if "tipo_check" in err_str or "tipo" in err_str and "check" in err_str:
+                erros.append(f"{item.banco} / {item.conta}: tipo '{item.tipo}' não é aceito pelo banco de dados")
+            elif "duplicate" in err_str.lower() or "unique" in err_str.lower():
+                erros.append(f"{item.banco} / {item.conta}: conta já cadastrada")
+            else:
+                erros.append(f"{item.banco} / {item.conta}: erro ao salvar")
     return {"inseridos": inseridos, "erros": erros}
 
 
