@@ -29,7 +29,7 @@ type PreviewItem = {
 
 type ContaBancaria = {
   id: string; banco: string; agencia: string | null;
-  conta: string; tipo: string; cnpj: string | null; ativo: boolean;
+  conta: string; tipo: string; cnpj: string | null; descricao: string | null; ativo: boolean;
 };
 
 type DocumentoEsperado = {
@@ -196,7 +196,7 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
     } finally { setImportando(false); }
   }
 
-  const TIPO_LABEL: Record<string, string> = { corrente: "Corrente", poupanca: "Poupança", investimento: "Investimento" };
+  const TIPO_LABEL: Record<string, string> = { corrente: "Corrente", poupanca: "Poupança", investimento: "Investimento", conta_garantida: "Conta garantida" };
 
   return (
     <div>
@@ -240,17 +240,24 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
                 placeholder="ex: 12345-6" style={inputStyle} />
             </Field>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
             <Field label="Tipo">
               <select value={form.tipo ?? "corrente"} onChange={(e) => setForm({ ...form, tipo: e.target.value })} style={inputStyle}>
                 <option value="corrente">Corrente</option>
                 <option value="poupanca">Poupança</option>
                 <option value="investimento">Investimento</option>
+                <option value="conta_garantida">Conta garantida</option>
               </select>
             </Field>
             <Field label="CNPJ (se diferente da empresa)">
               <input value={form.cnpj ?? ""} onChange={(e) => setForm({ ...form, cnpj: e.target.value })}
                 placeholder="ex: 00.000.000/0001-00" style={inputStyle} />
+            </Field>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <Field label="Descrição (opcional)">
+              <input value={form.descricao ?? ""} onChange={(e) => setForm({ ...form, descricao: e.target.value || null })}
+                placeholder="ex: Aplicação automática, LDA, Conta principal…" style={inputStyle} />
             </Field>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -268,6 +275,7 @@ function ContasAba({ empresaId, contas, loading, onRefresh }: {
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{c.banco}</span>
                 <Badge color="blue">{TIPO_LABEL[c.tipo] ?? c.tipo}</Badge>
+                {c.descricao && <span style={{ fontSize: 12, color: "#374151", fontStyle: "italic" }}>{c.descricao}</span>}
                 {!c.ativo && <Badge color="gray">Inativa</Badge>}
               </div>
               <span style={{ fontSize: 12, color: "#6b7280" }}>

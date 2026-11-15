@@ -31,6 +31,7 @@ class ContaBancariaIn(BaseModel):
     conta: str
     tipo: str = "corrente"
     cnpj: str | None = None
+    descricao: str | None = None
     ativo: bool = True
 
 class ContaBancariaUpdate(BaseModel):
@@ -39,6 +40,7 @@ class ContaBancariaUpdate(BaseModel):
     conta: str | None = None
     tipo: str | None = None
     cnpj: str | None = None
+    descricao: str | None = None
     ativo: bool | None = None
 
 class DocumentoEsperadoIn(BaseModel):
@@ -66,6 +68,7 @@ class ContaConfirmarItem(BaseModel):
     conta: str
     tipo: str = "corrente"
     cnpj: str | None = None
+    descricao: str | None = None
 
 class DocumentoEsperadoUpdate(BaseModel):
     conta_bancaria_id: str | None = None
@@ -344,6 +347,7 @@ async def confirmar_importar_contas(empresa_id: UUID, items: list[ContaConfirmar
                 "conta": item.conta,
                 "tipo": item.tipo,
                 "cnpj": item.cnpj,
+                "descricao": item.descricao,
             }).execute()
             inseridos += 1
             existing_keys.add(key)
