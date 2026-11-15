@@ -126,7 +126,7 @@ export default function EmpresaDetalheClient({
               </h1>
             )}
           </div>
-          <p style={{ color: "#6b7280", fontSize: 13, margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
+          <p style={{ color: "#6b7280", fontSize: 13, margin: 0, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             CNPJ: {cnpjExibido} · Código:{" "}
             {editandoCodigo && !anonimizado ? (
               <input
@@ -146,6 +146,11 @@ export default function EmpresaDetalheClient({
                 {salvando ? "..." : codigoEdit}
               </span>
             )}
+            {" · "}
+            <Link href={`/dashboard/empresas/${empresa.id}/configuracoes`}
+              style={{ fontSize: 12, color: "#6b7280", textDecoration: "none", borderBottom: "1px dashed #d1d5db" }}>
+              ⚙ Configurações
+            </Link>
           </p>
         </div>
 

@@ -1,0 +1,373 @@
+import io
+import logging
+from uuid import UUID
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from pydantic import BaseModel
+
+from app.core.supabase import get_supabase
+
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["configuracoes"])
+
+TIPOS_DOC = [
+    "extrato_bancario", "nota_fiscal", "guia_pagamento", "contrato",
+    "recibo", "balancete", "dre", "folha_pagamento", "comprovante_pagamento",
+    "contrato_emprestimo", "planilha_financeira", "outros",
+]
+
+# ── Modelos ────────────────────────────────────────────────────────────────
+
+class ContaBancariaIn(BaseModel):
+    banco: str
+    agencia: str | None = None
+    conta: str
+    tipo: str = "corrente"
+    cnpj: str | None = None
+    ativo: bool = True
+
+class ContaBancariaUpdate(BaseModel):
+    banco: str | None = None
+    agencia: str | None = None
+    conta: str | None = None
+    tipo: str | None = None
+    cnpj: str | None = None
+    ativo: bool | None = None
+
+class DocumentoEsperadoIn(BaseModel):
+    conta_bancaria_id: str | None = None
+    tipo: str
+    descricao: str
+    frequencia: str = "mensal"
+    ativo: bool = True
+
+class DocumentoEsperadoUpdate(BaseModel):
+    conta_bancaria_id: str | None = None
+    tipo: str | None = None
+    descricao: str | None = None
+    frequencia: str | None = None
+    ativo: bool | None = None
+
+# ── Contas bancárias ───────────────────────────────────────────────────────
+
+@router.get("/empresas/{empresa_id}/contas-bancarias")
+def listar_contas(empresa_id: UUID):
+    supabase = get_supabase()
+    try:
+        res = (
+            supabase.schema("gestao_docs").from_("conta_bancaria")
+            .select("*")
+            .eq("empresa_id", str(empresa_id))
+            .order("criado_em")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("listar_contas: %s", exc)
+        return []
+
+
+@router.post("/empresas/{empresa_id}/contas-bancarias", status_code=201)
+def criar_conta(empresa_id: UUID, body: ContaBancariaIn):
+    supabase = get_supabase()
+    data = body.model_dump()
+    data["empresa_id"] = str(empresa_id)
+    try:
+        res = supabase.schema("gestao_docs").from_("conta_bancaria").insert(data).execute()
+        return res.data[0] if res.data else {}
+    except Exception as exc:
+        logger.error("criar_conta: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/empresas/{empresa_id}/contas-bancarias/{conta_id}")
+def atualizar_conta(empresa_id: UUID, conta_id: UUID, body: ContaBancariaUpdate):
+    supabase = get_supabase()
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+    try:
+        res = (
+            supabase.schema("gestao_docs").from_("conta_bancaria")
+            .update(updates)
+            .eq("id", str(conta_id))
+            .eq("empresa_id", str(empresa_id))
+            .execute()
+        )
+        return res.data[0] if res.data else {}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete("/empresas/{empresa_id}/contas-bancarias/{conta_id}", status_code=204)
+def deletar_conta(empresa_id: UUID, conta_id: UUID):
+    supabase = get_supabase()
+    try:
+        supabase.schema("gestao_docs").from_("conta_bancaria").delete().eq("id", str(conta_id)).eq("empresa_id", str(empresa_id)).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Documentos esperados ───────────────────────────────────────────────────
+
+@router.get("/empresas/{empresa_id}/documentos-esperados")
+def listar_docs_esperados(empresa_id: UUID):
+    supabase = get_supabase()
+    try:
+        res = (
+            supabase.schema("gestao_docs").from_("documento_esperado")
+            .select("*, conta_bancaria:conta_bancaria_id(id,banco,conta,tipo)")
+            .eq("empresa_id", str(empresa_id))
+            .order("criado_em")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("listar_docs_esperados: %s", exc)
+        return []
+
+
+@router.post("/empresas/{empresa_id}/documentos-esperados", status_code=201)
+def criar_doc_esperado(empresa_id: UUID, body: DocumentoEsperadoIn):
+    supabase = get_supabase()
+    if body.tipo not in TIPOS_DOC:
+        raise HTTPException(status_code=400, detail=f"Tipo inválido: {body.tipo}")
+    data = body.model_dump()
+    data["empresa_id"] = str(empresa_id)
+    try:
+        res = supabase.schema("gestao_docs").from_("documento_esperado").insert(data).execute()
+        return res.data[0] if res.data else {}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.put("/empresas/{empresa_id}/documentos-esperados/{doc_id}")
+def atualizar_doc_esperado(empresa_id: UUID, doc_id: UUID, body: DocumentoEsperadoUpdate):
+    supabase = get_supabase()
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+    try:
+        res = (
+            supabase.schema("gestao_docs").from_("documento_esperado")
+            .update(updates)
+            .eq("id", str(doc_id))
+            .eq("empresa_id", str(empresa_id))
+            .execute()
+        )
+        return res.data[0] if res.data else {}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete("/empresas/{empresa_id}/documentos-esperados/{doc_id}", status_code=204)
+def deletar_doc_esperado(empresa_id: UUID, doc_id: UUID):
+    supabase = get_supabase()
+    try:
+        supabase.schema("gestao_docs").from_("documento_esperado").delete().eq("id", str(doc_id)).eq("empresa_id", str(empresa_id)).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Importar via planilha ──────────────────────────────────────────────────
+
+@router.post("/empresas/{empresa_id}/importar-contas", status_code=201)
+async def importar_contas(empresa_id: UUID, file: UploadFile = File(...)):
+    """
+    Importa contas bancárias de planilha XLSX.
+    Colunas esperadas (ordem): Banco | Agência | Conta | Tipo | CNPJ
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl não instalado no servidor")
+
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb.active
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Erro ao ler planilha: {exc}")
+
+    supabase = get_supabase()
+    inseridos = 0
+    erros: list[str] = []
+
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not any(row):
+            continue
+        try:
+            banco = str(row[0] or "").strip()
+            agencia = str(row[1] or "").strip() or None
+            conta = str(row[2] or "").strip()
+            tipo_raw = str(row[3] or "corrente").strip().lower()
+            cnpj = str(row[4] or "").strip() or None
+
+            if not banco or not conta:
+                erros.append(f"Linha {idx}: banco e conta são obrigatórios")
+                continue
+
+            tipo = tipo_raw if tipo_raw in ("corrente", "poupanca", "investimento") else "corrente"
+
+            supabase.schema("gestao_docs").from_("conta_bancaria").insert({
+                "empresa_id": str(empresa_id),
+                "banco": banco,
+                "agencia": agencia,
+                "conta": conta,
+                "tipo": tipo,
+                "cnpj": cnpj,
+            }).execute()
+            inseridos += 1
+        except Exception as exc:
+            erros.append(f"Linha {idx}: {exc}")
+
+    return {"inseridos": inseridos, "erros": erros}
+
+
+@router.post("/empresas/{empresa_id}/importar-documentos", status_code=201)
+async def importar_documentos(empresa_id: UUID, file: UploadFile = File(...)):
+    """
+    Importa documentos esperados de planilha XLSX.
+    Colunas esperadas (ordem): Tipo | Banco | Conta | Descrição | Frequência
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl não instalado no servidor")
+
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb.active
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Erro ao ler planilha: {exc}")
+
+    supabase = get_supabase()
+
+    # Carrega contas da empresa para resolver banco+conta → conta_bancaria_id
+    try:
+        contas_res = supabase.schema("gestao_docs").from_("conta_bancaria").select("id,banco,conta").eq("empresa_id", str(empresa_id)).execute()
+        contas_emp = contas_res.data or []
+    except Exception:
+        contas_emp = []
+
+    def _find_conta(banco_str: str, conta_str: str) -> str | None:
+        b = banco_str.lower().strip()
+        c = conta_str.lower().strip()
+        for ct in contas_emp:
+            if b in (ct.get("banco") or "").lower() and c in (ct.get("conta") or "").lower():
+                return ct["id"]
+        return None
+
+    inseridos = 0
+    erros: list[str] = []
+
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not any(row):
+            continue
+        try:
+            tipo = str(row[0] or "").strip().lower().replace(" ", "_")
+            banco = str(row[1] or "").strip()
+            conta = str(row[2] or "").strip()
+            descricao = str(row[3] or "").strip()
+            freq_raw = str(row[4] or "mensal").strip().lower()
+
+            if tipo not in TIPOS_DOC:
+                erros.append(f"Linha {idx}: tipo '{tipo}' inválido")
+                continue
+            if not descricao:
+                descricao = f"{tipo.replace('_', ' ').title()} {banco} {conta}".strip()
+
+            freq = freq_raw if freq_raw in ("mensal", "trimestral", "semestral", "anual") else "mensal"
+            conta_id = _find_conta(banco, conta) if banco and conta else None
+
+            supabase.schema("gestao_docs").from_("documento_esperado").insert({
+                "empresa_id": str(empresa_id),
+                "conta_bancaria_id": conta_id,
+                "tipo": tipo,
+                "descricao": descricao,
+                "frequencia": freq,
+            }).execute()
+            inseridos += 1
+        except Exception as exc:
+            erros.append(f"Linha {idx}: {exc}")
+
+    return {"inseridos": inseridos, "erros": erros}
+
+
+# ── Pendências do mês ──────────────────────────────────────────────────────
+
+@router.get("/empresas/{empresa_id}/pendencias/{ano}/{mes}")
+def pendencias_mes(empresa_id: UUID, ano: int, mes: int):
+    """
+    Retorna lista de documentos esperados com status de recebimento para o mês/ano.
+    """
+    supabase = get_supabase()
+    mes_ref = f"{ano:04d}-{mes:02d}"
+
+    try:
+        esperados = (
+            supabase.schema("gestao_docs").from_("documento_esperado")
+            .select("*, conta_bancaria:conta_bancaria_id(id,banco,conta,tipo)")
+            .eq("empresa_id", str(empresa_id))
+            .eq("ativo", True)
+            .execute()
+        ).data or []
+    except Exception as exc:
+        logger.error("pendencias_mes esperados: %s", exc)
+        return []
+
+    # Para frequência trimestral/semestral/anual filtra os meses que se aplicam
+    def _aplica_mes(freq: str, m: int) -> bool:
+        if freq == "mensal":
+            return True
+        if freq == "trimestral":
+            return m in (1, 4, 7, 10)
+        if freq == "semestral":
+            return m in (1, 7)
+        if freq == "anual":
+            return m == 1
+        return True
+
+    esperados_mes = [e for e in esperados if _aplica_mes(e.get("frequencia", "mensal"), mes)]
+
+    if not esperados_mes:
+        return []
+
+    # Busca documentos já recebidos neste mês para esta empresa
+    try:
+        recebidos = (
+            supabase.schema("gestao_docs").from_("documento")
+            .select("id,tipo,banco,conta,mes_referencia,status")
+            .eq("empresa_id", str(empresa_id))
+            .eq("mes_referencia", mes_ref)
+            .not_.in_("status", ["duplicata", "baixado"])
+            .is_("excluido_em", None)
+            .execute()
+        ).data or []
+    except Exception:
+        recebidos = []
+
+    def _doc_matches(esperado: dict, recebido: dict) -> bool:
+        if esperado["tipo"] != recebido.get("tipo"):
+            return False
+        cb = esperado.get("conta_bancaria")
+        if not cb:
+            return True
+        def _n(s: str) -> str:
+            return (s or "").lower().replace("-", "").replace(".", "").strip()
+        banco_ok = not cb.get("banco") or _n(cb["banco"]) in _n(recebido.get("banco") or "") or _n(recebido.get("banco") or "") in _n(cb["banco"])
+        conta_ok = not cb.get("conta") or _n(cb["conta"]) in _n(recebido.get("conta") or "")
+        return banco_ok and conta_ok
+
+    result = []
+    for esp in esperados_mes:
+        doc_recebido = next((r for r in recebidos if _doc_matches(esp, r)), None)
+        result.append({
+            **esp,
+            "mes_referencia": mes_ref,
+            "recebido": doc_recebido is not None,
+            "documento_id": doc_recebido["id"] if doc_recebido else None,
+        })
+
+    return result
