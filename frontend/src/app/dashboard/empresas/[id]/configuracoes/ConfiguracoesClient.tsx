@@ -38,23 +38,16 @@ type DocumentoEsperado = {
   conta_bancaria?: { id: string; banco: string; conta: string; tipo: string } | null;
 };
 
-type Pendencia = DocumentoEsperado & { mes_referencia: string; recebido: boolean; documento_id: string | null };
-
-type Aba = "contas" | "docs" | "pendencias";
+type Aba = "contas" | "docs";
 
 export default function ConfiguracoesClient({ empresa, inline }: { empresa: Empresa; inline?: boolean }) {
   const [aba, setAba] = useState<Aba>("contas");
   const [contas, setContas] = useState<ContaBancaria[]>([]);
   const [docs, setDocs] = useState<DocumentoEsperado[]>([]);
-  const [pendencias, setPendencias] = useState<Pendencia[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mesPend, setMesPend] = useState(() => {
-    const d = new Date(); return { ano: d.getFullYear(), mes: d.getMonth() + 1 };
-  });
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { carregarContas(); carregarDocs(); }, [empresa.id]);
-  useEffect(() => { if (aba === "pendencias") carregarPendencias(); }, [aba, mesPend]);
 
   async function carregarContas() {
     setLoading(true);
@@ -71,15 +64,6 @@ export default function ConfiguracoesClient({ empresa, inline }: { empresa: Empr
       setDocs(r.ok ? await r.json() : []);
     } catch { setDocs([]); }
   }
-
-  async function carregarPendencias() {
-    try {
-      const r = await fetch(`${API}/empresas/${empresa.id}/pendencias/${mesPend.ano}/${mesPend.mes}`);
-      setPendencias(r.ok ? await r.json() : []);
-    } catch { setPendencias([]); }
-  }
-
-  const totalPend = pendencias.filter((p) => !p.recebido).length;
 
   return (
     <div style={{ maxWidth: 820, padding: inline ? "0 0 32px" : "32px 24px" }}>
@@ -98,36 +82,28 @@ export default function ConfiguracoesClient({ empresa, inline }: { empresa: Empr
       {/* Abas */}
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e5e7eb", marginBottom: 24 }}>
         {([
-          { key: "contas",     label: "Contas bancárias" },
-          { key: "docs",       label: "Documentos esperados" },
-          { key: "pendencias", label: "Pendências do mês", badge: totalPend > 0 ? totalPend : null },
-        ] as { key: Aba; label: string; badge?: number | null }[]).map(({ key, label, badge }) => (
+          { key: "contas", label: "Contas bancárias" },
+          { key: "docs",   label: "Documentos esperados" },
+        ] as { key: Aba; label: string }[]).map(({ key, label }) => (
           <button key={key} onClick={() => setAba(key)}
             style={{ padding: "9px 18px", fontSize: 13, background: "none", border: "none",
               borderBottom: `2px solid ${aba === key ? "#c4a030" : "transparent"}`,
               color: aba === key ? "#c4a030" : "#6b7280", fontWeight: aba === key ? 700 : 400,
-              cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+              cursor: "pointer" }}>
             {label}
-            {badge != null && (
-              <span style={{ fontSize: 11, background: "#fef3c7", color: "#92400e", borderRadius: 10, padding: "1px 7px", fontWeight: 700 }}>{badge}</span>
-            )}
           </button>
         ))}
       </div>
 
       {/* ── Aba: Contas bancárias ── */}
       {aba === "contas" && (
-        <ContasAba empresaId={empresa.id} contas={contas} loading={loading} onRefresh={carregarContas} />
+        <ContasAba empresaId={empresa.id} contas={contas} loading={loading}
+          onRefresh={() => { carregarContas(); carregarDocs(); }} />
       )}
 
       {/* ── Aba: Documentos esperados ── */}
       {aba === "docs" && (
         <DocsAba empresaId={empresa.id} docs={docs} contas={contas} onRefresh={carregarDocs} />
-      )}
-
-      {/* ── Aba: Pendências ── */}
-      {aba === "pendencias" && (
-        <PendenciasAba pendencias={pendencias} mesPend={mesPend} setMesPend={setMesPend} />
       )}
     </div>
   );
@@ -486,89 +462,11 @@ function DocsAba({ empresaId, docs, contas, onRefresh }: {
   );
 }
 
-// ── Aba Pendências ──────────────────────────────────────────────────────────
-
-const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-
-function PendenciasAba({ pendencias, mesPend, setMesPend }: {
-  pendencias: Pendencia[];
-  mesPend: { ano: number; mes: number };
-  setMesPend: (v: { ano: number; mes: number }) => void;
-}) {
-  const recebidos = pendencias.filter((p) => p.recebido);
-  const pendentes = pendencias.filter((p) => !p.recebido);
-
-  function navMes(delta: number) {
-    let { ano, mes } = mesPend;
-    mes += delta;
-    if (mes < 1) { mes = 12; ano--; }
-    if (mes > 12) { mes = 1; ano++; }
-    setMesPend({ ano, mes });
-  }
-
-  return (
-    <div>
-      {/* Navegação de mês */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-        <button onClick={() => navMes(-1)} style={navBtnStyle}>←</button>
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#374151", minWidth: 160, textAlign: "center" }}>
-          {MESES[mesPend.mes - 1]} / {mesPend.ano}
-        </span>
-        <button onClick={() => navMes(1)} style={navBtnStyle}>→</button>
-        {pendentes.length > 0 && (
-          <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "#92400e",
-            background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 20, padding: "3px 10px" }}>
-            {pendentes.length} pendente{pendentes.length !== 1 ? "s" : ""}
-          </span>
-        )}
-        {pendentes.length === 0 && pendencias.length > 0 && (
-          <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "#16a34a",
-            background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 20, padding: "3px 10px" }}>
-            Tudo recebido
-          </span>
-        )}
-      </div>
-
-      {pendencias.length === 0 ? (
-        <EmptyState>Nenhum documento esperado cadastrado. Configure na aba "Documentos esperados".</EmptyState>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {pendencias.map((p) => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px",
-              background: p.recebido ? "#f0fdf4" : "#fff", border: `1px solid ${p.recebido ? "#bbf7d0" : "#e5e7eb"}`, borderRadius: 8 }}>
-              <div style={{ width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
-                background: p.recebido ? "#16a34a" : "#d1d5db" }} />
-              <div style={{ flex: 1 }}>
-                <span style={{ fontSize: 13, fontWeight: 500, color: p.recebido ? "#166534" : "#374151" }}>
-                  {p.descricao}
-                </span>
-                {p.conta_bancaria && (
-                  <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 8 }}>
-                    {p.conta_bancaria.banco} CC {p.conta_bancaria.conta}
-                  </span>
-                )}
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: p.recebido ? "#16a34a" : "#9ca3af" }}>
-                {p.recebido ? "Recebido" : "Pendente"}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Componentes auxiliares ──────────────────────────────────────────────────
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6,
   fontSize: 13, background: "white", boxSizing: "border-box",
-};
-
-const navBtnStyle: React.CSSProperties = {
-  padding: "5px 12px", border: "1px solid #d1d5db", borderRadius: 6,
-  background: "white", cursor: "pointer", fontSize: 14,
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

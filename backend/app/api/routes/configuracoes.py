@@ -103,7 +103,24 @@ def criar_conta(empresa_id: UUID, body: ContaBancariaIn):
     data["empresa_id"] = str(empresa_id)
     try:
         res = supabase.schema("gestao_docs").from_("conta_bancaria").insert(data).execute()
-        return res.data[0] if res.data else {}
+        conta = res.data[0] if res.data else {}
+        # Auto-cria documento_esperado de extrato mensal vinculado à conta
+        if conta.get("id"):
+            desc_parts = [f"Extrato {body.banco} CC {body.conta}"]
+            if body.descricao:
+                desc_parts.append(body.descricao)
+            try:
+                supabase.schema("gestao_docs").from_("documento_esperado").insert({
+                    "empresa_id": str(empresa_id),
+                    "conta_bancaria_id": conta["id"],
+                    "tipo": "extrato_bancario",
+                    "descricao": " — ".join(desc_parts),
+                    "frequencia": "mensal",
+                    "ativo": True,
+                }).execute()
+            except Exception as exc_doc:
+                logger.warning("criar_conta: falha ao criar doc esperado automático: %s", exc_doc)
+        return conta
     except Exception as exc:
         logger.error("criar_conta: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -132,6 +149,11 @@ def atualizar_conta(empresa_id: UUID, conta_id: UUID, body: ContaBancariaUpdate)
 def deletar_conta(empresa_id: UUID, conta_id: UUID):
     supabase = get_supabase()
     try:
+        # Remove documentos esperados vinculados automaticamente
+        try:
+            supabase.schema("gestao_docs").from_("documento_esperado").delete().eq("conta_bancaria_id", str(conta_id)).execute()
+        except Exception as exc_doc:
+            logger.warning("deletar_conta: falha ao remover docs esperados: %s", exc_doc)
         supabase.schema("gestao_docs").from_("conta_bancaria").delete().eq("id", str(conta_id)).eq("empresa_id", str(empresa_id)).execute()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

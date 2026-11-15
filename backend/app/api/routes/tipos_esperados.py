@@ -189,20 +189,22 @@ def configuracao_automatica(empresa_id: str, dry_run: bool = True, incluir_filia
 
 @router.get("/empresas/{empresa_id}/visao-anual")
 def get_visao_anual(empresa_id: str, ano: int | None = None):
-    """Matriz anual: tipos_esperados × 12 meses → recebido/pendente."""
+    """Matriz anual: documento_esperado × 12 meses → recebido/pendente."""
     if ano is None:
         ano = datetime.now().year
 
     supabase = get_supabase()
 
-    tipos_res = (
+    # Lê documentos esperados com conta_bancaria joined
+    docs_esp_res = (
         supabase.schema("gestao_docs")
-        .from_("tipo_documento_esperado")
-        .select("*")
+        .from_("documento_esperado")
+        .select("*, conta_bancaria:conta_bancaria_id(id,banco,conta,descricao)")
         .eq("empresa_id", empresa_id)
+        .neq("ativo", False)
         .execute()
     )
-    tipos = tipos_res.data
+    tipos = docs_esp_res.data or []
 
     docs_res = (
         supabase.schema("gestao_docs")
@@ -212,18 +214,34 @@ def get_visao_anual(empresa_id: str, ano: int | None = None):
         .like("mes_referencia", f"{ano}-%")
         .execute()
     )
-    docs = docs_res.data
+    docs = docs_res.data or []
 
     meses = [f"{ano}-{str(m).zfill(2)}" for m in range(1, 13)]
+
+    def _aplica_mes(freq: str, m: int) -> bool:
+        if freq == "trimestral":
+            return m in (1, 4, 7, 10)
+        if freq == "semestral":
+            return m in (1, 7)
+        if freq == "anual":
+            return m == 1
+        return True  # mensal ou qualquer outro valor
 
     tipos_data = []
     for tipo in tipos:
         tipo_val = tipo.get("tipo", "")
-        banco_esp = (tipo.get("banco") or "").lower().strip()
-        conta_esp = (tipo.get("conta") or "").lower().strip()
+        freq = tipo.get("frequencia", "mensal")
+        cb = tipo.get("conta_bancaria") or {}
+        banco_esp = (cb.get("banco") or "").lower().strip()
+        conta_esp = (cb.get("conta") or "").lower().strip()
 
         meses_data = {}
         for mes in meses:
+            mes_num = int(mes.split("-")[1])
+            if not _aplica_mes(freq, mes_num):
+                meses_data[mes] = {"recebido": False, "documento_id": None, "documento_nome": None}
+                continue
+
             docs_mes = [d for d in docs if d.get("mes_referencia") == mes]
             matching = None
             for doc in docs_mes:
@@ -247,13 +265,13 @@ def get_visao_anual(empresa_id: str, ano: int | None = None):
                 "documento_nome": matching["nome_arquivo"] if matching else None,
             }
 
-        label = tipo.get("descricao") or _tipo_label(tipo_val, tipo.get("banco"), tipo.get("conta"))
+        label = tipo.get("descricao") or _tipo_label(tipo_val, cb.get("banco"), cb.get("conta"))
         tipos_data.append({
             "tipo_id": tipo["id"],
             "tipo": tipo_val,
             "descricao": label,
-            "banco": tipo.get("banco"),
-            "conta": tipo.get("conta"),
+            "banco": cb.get("banco"),
+            "conta": cb.get("conta"),
             "meses": meses_data,
         })
 
