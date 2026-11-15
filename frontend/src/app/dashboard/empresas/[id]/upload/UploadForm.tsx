@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import Link from "next/link";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
