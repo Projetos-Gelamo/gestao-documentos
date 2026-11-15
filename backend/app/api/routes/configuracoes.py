@@ -271,7 +271,7 @@ async def preview_importar_contas(empresa_id: UUID, file: UploadFile = File(...)
     supabase = get_supabase()
     try:
         empresas = (supabase.schema("gestao_docs").from_("empresa")
-                    .select("id,nome_razao_social,cnpj").execute()).data or []
+                    .select("id,nome,cnpj").execute()).data or []
     except Exception:
         empresas = []
 
@@ -280,9 +280,9 @@ async def preview_importar_contas(empresa_id: UUID, file: UploadFile = File(...)
         if norm:
             for emp in empresas:
                 if _norm_cnpj(emp.get("cnpj")) == norm:
-                    return emp["id"], emp.get("nome_razao_social") or emp["id"]
+                    return emp["id"], emp.get("nome") or emp["id"]
         return str(empresa_id), next(
-            (emp.get("nome_razao_social") or emp["id"] for emp in empresas if emp["id"] == str(empresa_id)),
+            (emp.get("nome") or emp["id"] for emp in empresas if emp["id"] == str(empresa_id)),
             str(empresa_id),
         )
 
