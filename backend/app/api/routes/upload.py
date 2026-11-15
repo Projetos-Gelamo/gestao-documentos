@@ -571,7 +571,25 @@ async def confirmar_upload(body: ConfirmarRequest):
             except Exception:
                 pass  # já existe ou outro erro não crítico
 
+        duplicata_nome_arquivo: str | None = None
         if final_status == "duplicata":
+            # Busca nome do arquivo original para exibir ao usuário
+            if duplicata_de:
+                try:
+                    orig = (
+                        supabase.schema("gestao_docs").from_("documento")
+                        .select("nome_arquivo").eq("id", duplicata_de).single().execute()
+                    )
+                    duplicata_nome_arquivo = (orig.data or {}).get("nome_arquivo")
+                except Exception:
+                    pass
+            # Adiciona duplicata à fila de revisão
+            try:
+                supabase.schema("gestao_docs").from_("fila_revisao").insert(
+                    {"documento_id": doc_id}
+                ).execute()
+            except Exception:
+                pass
             try:
                 supabase.schema("gestao_docs").from_("relatorio_erro").insert({
                     "data": datetime.now().isoformat(),
@@ -586,6 +604,7 @@ async def confirmar_upload(body: ConfirmarRequest):
             "id": doc_id, "nome_arquivo": filename, "tipo": tipo,
             "banco": banco, "conta": conta, "mes_referencia": mes_ref,
             "status": final_status, "duplicata_de": duplicata_de,
+            "duplicata_nome_arquivo": duplicata_nome_arquivo,
             "empresa_id": empresa_destino_id,
             "cnpj_extraido": doc.get("cnpj_extraido"),
             "confidence": doc.get("confianca", 0),

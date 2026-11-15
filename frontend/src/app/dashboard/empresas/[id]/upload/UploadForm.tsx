@@ -61,6 +61,7 @@ type ResultadoFinal = {
   mes_referencia: string | null;
   status: string;
   duplicata_de: string | null;
+  duplicata_nome_arquivo?: string | null;
   empresa_id: string;
   cnpj_extraido: string | null;
   confidence: number;
@@ -87,7 +88,6 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   const [finalResults, setFinalResults] = useState<ResultadoFinal[]>([]);
   const [previewState, setPreviewState] = useState<{ url: string; nome: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
-  const [acoesFinal, setAcoesFinal] = useState<Record<string, string | null>>({});
   const [scanErroGeral, setScanErroGeral] = useState<string | null>(null);
 
   function addFiles(files: FileList | File[]) {
@@ -344,7 +344,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       {step === "pre_classif" && (
         <div>
           <p style={{ fontSize: 13, color: "#374151", marginBottom: 20 }}>
-            A IA analisou os arquivos. Revise os itens abaixo antes de salvar.
+            A IA analisou os arquivos. <strong>Decida o destino</strong> dos itens abaixo — após confirmar, o sistema salva e exibe o resultado.
           </p>
 
           {(gruposDecisao.length > 0 || naoReconhecidos.length > 0) && (
@@ -468,11 +468,8 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
               <ResultadoRow
                 key={resultado.id}
                 resultado={resultado}
-                empresaId={empresaId}
-                acaoFinalizada={acoesFinal[resultado.id] ?? null}
-                onAcaoFinalizada={(msg) => setAcoesFinal((prev) => ({ ...prev, [resultado.id]: msg }))}
-                onPreview={() => handlePreview(resultado.id)}
-                previewLoading={previewLoading === resultado.id}
+                onPreview={handlePreview}
+                previewLoading={previewLoading}
               />
             ))}
           </div>
@@ -564,7 +561,7 @@ function DecisaoCard({ grupo, acaoSelecionada, onAcao }: {
 function StepBar({ step }: { step: Step }) {
   const etapas = [
     { keys: ["selecao", "scan_loading"],        label: "1 · Selecionar" },
-    { keys: ["pre_classif", "confirm_loading"],  label: "2 · Revisar" },
+    { keys: ["pre_classif", "confirm_loading"],  label: "2 · Rotear" },
     { keys: ["resultados"],                      label: "3 · Resultado" },
   ];
   const stepIdx = etapas.findIndex((e) => e.keys.includes(step));
@@ -594,18 +591,12 @@ function StepBar({ step }: { step: Step }) {
 
 // ── Linha de resultado ─────────────────────────────────────────────────────
 
-function ResultadoRow({ resultado, empresaId, acaoFinalizada, onAcaoFinalizada, onPreview, previewLoading }: {
+function ResultadoRow({ resultado, onPreview, previewLoading }: {
   resultado: ResultadoFinal;
-  empresaId: string;
-  acaoFinalizada: string | null;
-  onAcaoFinalizada: (msg: string) => void;
-  onPreview: () => void;
-  previewLoading: boolean;
+  onPreview: (docId: string) => void;
+  previewLoading: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [acaoEmAndamento, setAcaoEmAndamento] = useState<string | null>(null);
-  const [classificandoManual, setClassificandoManual] = useState(false);
-  const [manualForm, setManualForm] = useState({ tipo: "extrato_bancario", mes_referencia: "", banco: "", conta: "" });
 
   const { status } = resultado;
   const cfg = ({
@@ -618,59 +609,33 @@ function ResultadoRow({ resultado, empresaId, acaoFinalizada, onAcaoFinalizada, 
   } as Record<string, { icon: string; color: string; bg: string; label: string }>)[status]
     ?? { icon: "·", color: "#6b7280", bg: "#f9fafb", label: status };
 
-  async function logAcao(tipo_acao: string, detalhes?: object) {
-    try {
-      await fetch(`${API}/acoes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ empresa_id: empresaId, documento_id: resultado.id, tipo_acao, detalhes }),
-      });
-    } catch {}
-  }
-
-  async function handleSubstituir() {
-    if (!resultado.duplicata_de) return;
-    setAcaoEmAndamento("substituir");
-    try {
-      const r = await fetch(`${API}/documentos/${resultado.id}/substituir/${resultado.duplicata_de}`, { method: "POST" });
-      if (r.ok) { await logAcao("substituir_duplicata", { original_id: resultado.duplicata_de }); onAcaoFinalizada("Original substituído — documento classificado"); }
-      else alert("Erro ao substituir.");
-    } finally { setAcaoEmAndamento(null); }
-  }
-
-  async function handleExcluir() {
-    setAcaoEmAndamento("excluir");
-    try {
-      const r = await fetch(`${API}/documentos/${resultado.id}`, { method: "DELETE" });
-      if (r.ok) { await logAcao("excluir_duplicata"); onAcaoFinalizada("Arquivo excluído"); }
-      else alert("Erro ao excluir.");
-    } finally { setAcaoEmAndamento(null); }
-  }
-
-  async function handleClassificarManual() {
-    if (!manualForm.tipo || !manualForm.mes_referencia) { alert("Preencha tipo e mês (YYYY-MM)."); return; }
-    setAcaoEmAndamento("classificar");
-    try {
-      const r = await fetch(`${API}/documentos/${resultado.id}/classificar-manual`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...manualForm, banco: manualForm.banco || null, conta: manualForm.conta || null }),
-      });
-      if (r.ok) { await logAcao("classificar_manual", manualForm); onAcaoFinalizada("Classificado manualmente"); setClassificandoManual(false); }
-      else alert("Erro ao classificar.");
-    } finally { setAcaoEmAndamento(null); }
-  }
-
-  const temAcao = ["duplicata", "nao_reconhecido"].includes(status);
+  const podeVer = ["classificado", "duplicata", "nao_reconhecido", "aguardando_roteamento"].includes(status);
   const isBaixado = status === "baixado" && resultado.download_url;
+  const isLoadingThis = previewLoading === resultado.id;
+  const isLoadingOriginal = resultado.duplicata_de ? previewLoading === resultado.duplicata_de : false;
 
   return (
     <div style={{ background: cfg.bg, border: "1px solid #e5e7eb", borderRadius: 8, padding: "10px 14px" }}>
+      {/* Linha principal */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 14, color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
-        <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {resultado.nome_arquivo}
-        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {resultado.nome_arquivo}
+          </span>
+          {/* Info do conflito visível sem expandir */}
+          {status === "duplicata" && resultado.duplicata_nome_arquivo && (
+            <span style={{ fontSize: 11, color: "#c2410c", display: "block", marginTop: 1 }}>
+              Conflita com: <strong>{resultado.duplicata_nome_arquivo}</strong>
+            </span>
+          )}
+          {status === "nao_reconhecido" && (
+            <span style={{ fontSize: 11, color: "#d97706" }}>Enviado para fila de revisão</span>
+          )}
+          {status === "aguardando_roteamento" && (
+            <span style={{ fontSize: 11, color: "#7c3aed" }}>Na fila de roteamento</span>
+          )}
+        </div>
         <span style={{ fontSize: 12, color: cfg.color, fontWeight: 600, flexShrink: 0 }}>{cfg.label}</span>
 
         {isBaixado && (
@@ -680,10 +645,18 @@ function ResultadoRow({ resultado, empresaId, acaoFinalizada, onAcaoFinalizada, 
           </a>
         )}
 
-        {temAcao && !acaoFinalizada && (
-          <button onClick={onPreview} disabled={previewLoading}
-            style={{ padding: "3px 10px", background: "white", color: "#2563eb", border: "1px solid #2563eb", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: previewLoading ? "not-allowed" : "pointer", opacity: previewLoading ? 0.6 : 1, flexShrink: 0 }}>
-            {previewLoading ? "..." : "👁 Ver"}
+        {podeVer && (
+          <button onClick={() => onPreview(resultado.id)} disabled={isLoadingThis}
+            style={{ padding: "3px 10px", background: "white", color: "#2563eb", border: "1px solid #2563eb", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: isLoadingThis ? "not-allowed" : "pointer", opacity: isLoadingThis ? 0.6 : 1, flexShrink: 0 }}>
+            {isLoadingThis ? "…" : "👁 Ver"}
+          </button>
+        )}
+
+        {status === "duplicata" && resultado.duplicata_de && (
+          <button onClick={() => onPreview(resultado.duplicata_de!)} disabled={isLoadingOriginal}
+            title="Visualizar o arquivo que já estava salvo"
+            style={{ padding: "3px 10px", background: "white", color: "#c2410c", border: "1px solid #c2410c", borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: isLoadingOriginal ? "not-allowed" : "pointer", opacity: isLoadingOriginal ? 0.6 : 1, flexShrink: 0 }}>
+            {isLoadingOriginal ? "…" : "👁 Original"}
           </button>
         )}
 
@@ -693,35 +666,23 @@ function ResultadoRow({ resultado, empresaId, acaoFinalizada, onAcaoFinalizada, 
         </button>
       </div>
 
+      {/* Detalhes expandidos — apenas informacionais */}
       {expanded && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px", marginBottom: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px" }}>
             {resultado.tipo && <Detail label="Tipo" value={TIPO_LABEL[resultado.tipo] ?? resultado.tipo} />}
             {resultado.banco && <Detail label="Banco" value={resultado.banco} />}
             {resultado.conta && <Detail label="Conta" value={resultado.conta} />}
             {resultado.mes_referencia && <Detail label="Mês" value={_mesPtBR(resultado.mes_referencia)} />}
             {resultado.nome_sugerido && <Detail label="Nome sugerido" value={resultado.nome_sugerido} highlight />}
+            {status === "duplicata" && resultado.duplicata_nome_arquivo && (
+              <Detail label="Conflita com" value={resultado.duplicata_nome_arquivo} />
+            )}
           </div>
-
-          {acaoFinalizada ? (
-            <div style={{ padding: "6px 10px", background: "#f0fdf4", borderRadius: 6, fontSize: 12, color: "#16a34a", fontWeight: 600 }}>✓ {acaoFinalizada}</div>
-          ) : (
-            <>
-              {status === "duplicata" && resultado.duplicata_de && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <AcaoBtn onClick={handleSubstituir} loading={acaoEmAndamento === "substituir"} label="↩ Substituir original" color="#16a34a" />
-                  <AcaoBtn onClick={handleExcluir} loading={acaoEmAndamento === "excluir"} label="✕ Excluir este" color="#b91c1c" />
-                </div>
-              )}
-              {status === "nao_reconhecido" && (
-                <div>
-                  {!classificandoManual
-                    ? <AcaoBtn onClick={() => setClassificandoManual(true)} loading={false} label="✏ Classificar agora" color="#d97706" />
-                    : <ClassificacaoForm form={manualForm} onChange={setManualForm} onSubmit={handleClassificarManual} onCancel={() => setClassificandoManual(false)} loading={acaoEmAndamento === "classificar"} />
-                  }
-                </div>
-              )}
-            </>
+          {(status === "duplicata" || status === "nao_reconhecido") && (
+            <p style={{ marginTop: 8, fontSize: 11, color: "#6b7280" }}>
+              Para resolver este item, acesse a <strong>Fila de revisão</strong> na página da empresa.
+            </p>
           )}
         </div>
       )}
@@ -760,51 +721,6 @@ function PreviewModal({ url, nome, onClose }: { url: string; nome: string; onClo
 
 // ── Sub-componentes ────────────────────────────────────────────────────────
 
-function AcaoBtn({ onClick, loading, label, color }: { onClick: () => void; loading: boolean; label: string; color: string }) {
-  return (
-    <button onClick={onClick} disabled={loading}
-      style={{ padding: "5px 12px", background: "white", color, border: `1px solid ${color}`, borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1 }}>
-      {loading ? "Aguarde..." : label}
-    </button>
-  );
-}
-
-function ClassificacaoForm({ form, onChange, onSubmit, onCancel, loading }: {
-  form: { tipo: string; mes_referencia: string; banco: string; conta: string };
-  onChange: (f: any) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-  loading: boolean;
-}) {
-  return (
-    <div style={{ marginTop: 8, padding: 12, background: "#faf8f4", border: "1px solid #e5e7eb", borderRadius: 8 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-        <div>
-          <label style={lbl}>Tipo</label>
-          <select value={form.tipo} onChange={(e) => onChange({ ...form, tipo: e.target.value })} style={inp}>
-            {TIPOS_DOC.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={lbl}>Mês (YYYY-MM)</label>
-          <input placeholder="Ex: 2025-01" value={form.mes_referencia} onChange={(e) => onChange({ ...form, mes_referencia: e.target.value })} style={inp} />
-        </div>
-        {form.tipo === "extrato_bancario" && (
-          <>
-            <div><label style={lbl}>Banco</label><input placeholder="Ex: Itaú" value={form.banco} onChange={(e) => onChange({ ...form, banco: e.target.value })} style={inp} /></div>
-            <div><label style={lbl}>Conta</label><input placeholder="Ex: 12345-6" value={form.conta} onChange={(e) => onChange({ ...form, conta: e.target.value })} style={inp} /></div>
-          </>
-        )}
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={onSubmit} disabled={loading} style={{ padding: "6px 14px", background: "#0c1a2e", color: "#c4a030", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer" }}>
-          {loading ? "Salvando..." : "Salvar"}
-        </button>
-        <button onClick={onCancel} style={{ padding: "6px 12px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>Cancelar</button>
-      </div>
-    </div>
-  );
-}
 
 function Detail({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
