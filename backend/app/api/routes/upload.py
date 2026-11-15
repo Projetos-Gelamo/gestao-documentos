@@ -367,27 +367,23 @@ async def scan_upload(
                     empresa_sugerida_id = e["id"]
                     empresa_sugerida_nome = e.get("nome")
                     break
-            logger.info(
-                "SCAN CNPJ: arquivo=%s cnpj_extraido=%s cnpj_norm=%s empresa_sugerida=%s",
-                filename, result.cnpj, cnpj_doc, empresa_sugerida_id
-            )
-        else:
-            logger.info("SCAN CNPJ: arquivo=%s sem_cnpj_extraido", filename)
 
         # Se CNPJ não identificou outra empresa, tenta pelo banco+conta cadastrado
         if empresa_sugerida_id == empresa_id and result.conta:
             b = (result.banco or "").lower().strip()
-            c = re.sub(r"[^\d]", "", result.conta)
-            match = conta_empresa_map.get(f"{b}|{c}") if b else None
-            if not match:
-                match = conta_empresa_map.get(f"|{c}")
-            logger.info(
-                "SCAN CONTA: arquivo=%s banco=%r conta=%r b=%r c=%r chave_exata=%r chave_fallback=%r map_keys=%s match=%s",
-                filename, result.banco, result.conta, b, c,
-                f"{b}|{c}", f"|{c}",
-                list(conta_empresa_map.keys())[:20],
-                match,
-            )
+            c_full = re.sub(r"[^\d]", "", result.conta)
+            # PDF pode trazer agencia/conta (ex: "0143/11810-7") — tenta também só dígitos pós "/"
+            c_sem_ag = c_full
+            if "/" in result.conta:
+                c_sem_ag = re.sub(r"[^\d]", "", result.conta.split("/", 1)[1])
+            match = None
+            for c in dict.fromkeys([c_full, c_sem_ag]):  # preserva ordem, sem duplicatas
+                if b:
+                    match = conta_empresa_map.get(f"{b}|{c}")
+                if not match:
+                    match = conta_empresa_map.get(f"|{c}")
+                if match:
+                    break
             if match:
                 empresa_sugerida_id, empresa_sugerida_nome = match
 
