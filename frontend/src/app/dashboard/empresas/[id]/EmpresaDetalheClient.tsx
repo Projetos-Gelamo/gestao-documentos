@@ -6,11 +6,13 @@ import ChecklistSection from "./ChecklistSection";
 import DocumentosTable from "./DocumentosTable";
 import TiposEsperadosSection from "./TiposEsperadosSection";
 import RevisaoPendenteSection from "./RevisaoPendenteSection";
+import AnnualView from "./anual/AnnualView";
+import ConfiguracoesClient from "./configuracoes/ConfiguracoesClient";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
 type Departamento = "contabil" | "dp" | "legal" | "fiscal";
-type SubAbaContabil = "visao" | "enviar" | "automatizacao";
+type SubAbaContabil = "controle" | "enviar" | "automatizacao" | "configuracoes";
 
 const ABAS: { key: Departamento; label: string }[] = [
   { key: "contabil", label: "Contábil" },
@@ -20,9 +22,10 @@ const ABAS: { key: Departamento; label: string }[] = [
 ];
 
 const SUB_ABAS_CONTABIL: { key: SubAbaContabil; label: string; icon: string }[] = [
-  { key: "visao",         label: "Visão anual",        icon: "📋" },
-  { key: "enviar",        label: "Enviar documentos",  icon: "📤" },
-  { key: "automatizacao", label: "Automatização",      icon: "✦" },
+  { key: "controle",      label: "Controle Documentos", icon: "📊" },
+  { key: "enviar",        label: "Enviar Documentos",   icon: "📤" },
+  { key: "automatizacao", label: "Automação",            icon: "✦" },
+  { key: "configuracoes", label: "Configurações",        icon: "⚙" },
 ];
 
 type Empresa = { id: string; nome: string; cnpj: string; codigo: string; matriz_id?: string | null };
@@ -46,7 +49,7 @@ export default function EmpresaDetalheClient({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [aba, setAba] = useState<Departamento>("contabil");
-  const [subAba, setSubAba] = useState<SubAbaContabil>("visao");
+  const [subAba, setSubAba] = useState<SubAbaContabil>("controle");
 
   const [entidadeId, setEntidadeId] = useState(empresa.id);
   const [entidadeDocs, setEntidadeDocs] = useState<any[]>(documentos);
@@ -146,11 +149,6 @@ export default function EmpresaDetalheClient({
                 {salvando ? "..." : codigoEdit}
               </span>
             )}
-            {" · "}
-            <Link href={`/dashboard/empresas/${empresa.id}/configuracoes`}
-              style={{ fontSize: 12, color: "#6b7280", textDecoration: "none", borderBottom: "1px dashed #d1d5db" }}>
-              ⚙ Configurações
-            </Link>
           </p>
         </div>
 
@@ -282,26 +280,13 @@ export default function EmpresaDetalheClient({
 
           <div style={{ padding: 24 }}>
 
-            {/* ── Contábil → Visão anual ── */}
-            {aba === "contabil" && subAba === "visao" && (
-              <div>
-                <ChecklistSection empresaId={entidadeId} />
-                <div style={{ marginTop: 28 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
-                      Documentos recebidos
-                      {carregandoDocs && <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 8, fontWeight: 400 }}>Carregando...</span>}
-                    </h2>
-                    <Link
-                      href={`/dashboard/empresas/${entidadeId}/anual`}
-                      style={{ padding: "7px 14px", background: "#0c1a2e", color: "#c4a030", border: "1px solid #c4a030", borderRadius: 8, fontSize: 13, fontWeight: 600, textDecoration: "none" }}
-                    >
-                      Ver visão anual completa →
-                    </Link>
-                  </div>
-                  <DocumentosTable documentos={entidadeDocs} anonimizado={anonimizado} departamento={aba} />
-                </div>
-              </div>
+            {/* ── Contábil → Controle Documentos ── */}
+            {aba === "contabil" && subAba === "controle" && (
+              <AnnualView
+                empresaId={entidadeId}
+                empresaNome={entidadeAtual.nome}
+                inline
+              />
             )}
 
             {/* ── Contábil → Enviar documentos ── */}
@@ -382,6 +367,11 @@ export default function EmpresaDetalheClient({
                   </div>
                 </div>
               </div>
+            )}
+
+            {/* ── Contábil → Configurações ── */}
+            {aba === "contabil" && subAba === "configuracoes" && (
+              <ConfiguracoesClient empresa={{ id: entidadeAtual.id, nome: entidadeAtual.nome, cnpj: entidadeAtual.cnpj, codigo: entidadeAtual.codigo }} />
             )}
 
             {/* ── Dep. Pessoal / Legal / Fiscal ── */}

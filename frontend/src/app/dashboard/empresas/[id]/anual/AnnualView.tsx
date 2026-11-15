@@ -21,7 +21,7 @@ function mesAtual() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export default function AnnualView({ empresaId, empresaNome }: { empresaId: string; empresaNome: string }) {
+export default function AnnualView({ empresaId, empresaNome, inline }: { empresaId: string; empresaNome: string; inline?: boolean }) {
   const [ano, setAno] = useState(new Date().getFullYear());
   const [data, setData] = useState<VIsaoAnual | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,23 +47,30 @@ export default function AnnualView({ empresaId, empresaNome }: { empresaId: stri
     <div>
       {/* Cabeçalho */}
       <div style={{ marginBottom: 24 }}>
-        <a href={`/dashboard/empresas/${empresaId}`} style={{ fontSize: 13, color: "#c4a030", textDecoration: "none" }}>
-          ← {empresaNome}
-        </a>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e", marginBottom: 2 }}>
-              Visão Anual · {empresaNome}
-            </h1>
-            <p style={{ fontSize: 13, color: "#6b7280" }}>Recebimento mensal de documentos · Exercício {ano}</p>
-          </div>
+        {!inline && (
+          <a href={`/dashboard/empresas/${empresaId}`} style={{ fontSize: 13, color: "#c4a030", textDecoration: "none" }}>
+            ← {empresaNome}
+          </a>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: inline ? 0 : 8 }}>
+          {!inline && (
+            <div>
+              <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e", marginBottom: 2 }}>
+                Controle de Documentos · {empresaNome}
+              </h1>
+              <p style={{ fontSize: 13, color: "#6b7280" }}>Recebimento mensal de documentos · Exercício {ano}</p>
+            </div>
+          )}
+          {inline && (
+            <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>Recebimento mensal · Exercício {ano}</p>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <select
               value={ano}
               onChange={(e) => setAno(Number(e.target.value))}
               style={{ padding: "7px 12px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 14, background: "white", cursor: "pointer" }}
             >
-              {[ano - 1, ano, ano + 1].map((y) => <option key={y} value={y}>{y}</option>)}
+              {[ano - 2, ano - 1, ano, ano + 1].map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
         </div>
@@ -84,9 +91,14 @@ export default function AnnualView({ empresaId, empresaNome }: { empresaId: stri
       {!loading && data && data.tipos.length === 0 && (
         <div style={{ background: "white", borderRadius: 10, padding: 32, textAlign: "center", color: "#9ca3af" }}>
           <p style={{ fontSize: 15 }}>Nenhum documento esperado configurado para esta empresa.</p>
-          <a href={`/dashboard/empresas/${empresaId}`} style={{ color: "#c4a030", fontSize: 13, marginTop: 8, display: "inline-block" }}>
-            Configurar documentos esperados →
-          </a>
+          {!inline && (
+            <a href={`/dashboard/empresas/${empresaId}`} style={{ color: "#c4a030", fontSize: 13, marginTop: 8, display: "inline-block" }}>
+              Configurar documentos esperados →
+            </a>
+          )}
+          {inline && (
+            <p style={{ color: "#c4a030", fontSize: 13, marginTop: 8 }}>Acesse a aba Configurações para cadastrar os documentos esperados.</p>
+          )}
         </div>
       )}
 
