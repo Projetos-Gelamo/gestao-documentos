@@ -181,9 +181,9 @@ export default function FilaGlobalPage() {
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Fila Global</h1>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Aguardando Aprovação</h1>
             <p style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>
-              Arquivos que não foram vinculados a nenhuma empresa durante o envio. Mova para a empresa certa ou exclua.
+              Arquivos aguardando destino. Mova para a empresa certa ou exclua.
             </p>
           </div>
           {pendentes.length > 0 && (
@@ -211,8 +211,8 @@ export default function FilaGlobalPage() {
       {pendentes.length === 0 ? (
         <div style={{ padding: 32, background: "#f0fdf4", borderRadius: 10, textAlign: "center" }}>
           <p style={{ fontSize: 20, marginBottom: 8 }}>✓</p>
-          <p style={{ fontSize: 14, color: "#16a34a", fontWeight: 600 }}>Fila global vazia</p>
-          <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Todos os arquivos foram roteados.</p>
+          <p style={{ fontSize: 14, color: "#16a34a", fontWeight: 600 }}>Aguardando Aprovação vazia</p>
+          <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Todos os arquivos foram aprovados.</p>
         </div>
       ) : (
         <>

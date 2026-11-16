@@ -511,7 +511,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
                 <p style={{ fontSize: 12, color: "#7c3aed", marginTop: 8 }}>
                   Arquivos na fila global aguardam destino.{" "}
                   <Link href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>
-                    Ir para Fila Global →
+                    Ir para Aguardando Aprovação →
                   </Link>
                 </p>
               )}
@@ -574,7 +574,7 @@ function ContasIdentificacaoStep({
         Indique quais <strong>pertencem a {empresaNome}</strong>.
       </p>
       <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 20 }}>
-        As contas que não pertencem podem ser removidas da tela — os arquivos irão para a <strong>Fila Global</strong>, onde você decide o destino.
+        As contas que não pertencem podem ser removidas da tela — os arquivos irão para <strong>Aguardando Aprovação</strong>, onde você decide o destino.
       </p>
 
       {visiveis.length === 0 && contas.length > 0 && (
@@ -600,7 +600,7 @@ function ContasIdentificacaoStep({
 
       {ocultas.length > 0 && (
         <div style={{ marginBottom: 16, padding: "8px 14px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 8, fontSize: 12, color: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span>{ocultas.length} conta{ocultas.length !== 1 ? "s" : ""} oculta{ocultas.length !== 1 ? "s" : ""} — {ocultas.flatMap((c) => c.arquivos).length} arquivo{ocultas.flatMap((c) => c.arquivos).length !== 1 ? "s" : ""} irão para a Fila Global</span>
+          <span>{ocultas.length} conta{ocultas.length !== 1 ? "s" : ""} oculta{ocultas.length !== 1 ? "s" : ""} — {ocultas.flatMap((c) => c.arquivos).length} arquivo{ocultas.flatMap((c) => c.arquivos).length !== 1 ? "s" : ""} irão para Aguardando Aprovação</span>
           <button onClick={mostrarTodas} style={{ background: "none", border: "none", color: "#7c3aed", cursor: "pointer", fontWeight: 600, fontSize: 12, textDecoration: "underline" }}>
             Mostrar
           </button>
@@ -623,9 +623,9 @@ function ContasIdentificacaoStep({
       )}
 
       <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-        <button onClick={onNext} disabled={visiveis.length === 0 && ocultas.length === contas.length && contas.length > 0}
+        <button onClick={onNext}
           style={{ padding: "10px 28px", background: "#c4a030", color: "#0c1a2e", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-          Revisar arquivos →
+          {ocultas.length > 0 && visiveis.length === 0 ? `Enviar ${ocultas.flatMap((c) => c.arquivos).length} arquivo(s) para Aguardando Aprovação →` : "Revisar arquivos →"}
         </button>
         <button onClick={onVoltar}
           style={{ padding: "10px 18px", background: "white", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
@@ -844,7 +844,7 @@ function ArquivosRevisaoStep({
             ? Não identificados ({arquivosSemTipo.length})
           </h3>
           <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
-            A IA não conseguiu identificar o tipo destes arquivos. Classifique-os manualmente ou deixe em branco para enviar para a Fila Global.
+            A IA não conseguiu identificar o tipo destes arquivos. Classifique-os manualmente ou deixe em branco para enviar para Aguardando Aprovação.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {arquivosSemTipo.map((item) => (
@@ -860,7 +860,7 @@ function ArquivosRevisaoStep({
                     {TIPOS_DOC.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
                   {!item.tipoSelecionado && (
-                    <span style={{ fontSize: 11, color: "#7c3aed", flexShrink: 0 }}>→ Fila Global</span>
+                    <span style={{ fontSize: 11, color: "#7c3aed", flexShrink: 0 }}>→ Aguardando Aprovação</span>
                   )}
                   {item.tipoSelecionado && (
                     <span style={{ fontSize: 11, color: "#16a34a", flexShrink: 0 }}>→ Será salvo</span>
@@ -883,8 +883,8 @@ function ArquivosRevisaoStep({
       {/* Resumo da fila global */}
       {totalFilaGlobal > 0 && (
         <div style={{ marginBottom: 24, padding: "10px 14px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 8, fontSize: 12, color: "#7c3aed" }}>
-          <strong>{totalFilaGlobal} arquivo{totalFilaGlobal !== 1 ? "s" : ""}</strong> irá{totalFilaGlobal !== 1 ? "o" : ""} para a Fila Global após o envio.
-          Acesse <Link href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>Fila Global</Link> para mover para a empresa certa ou excluir.
+          <strong>{totalFilaGlobal} arquivo{totalFilaGlobal !== 1 ? "s" : ""}</strong> irá{totalFilaGlobal !== 1 ? "o" : ""} para Aguardando Aprovação após o envio.
+          Acesse <Link href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>Aguardando Aprovação</Link> para mover para a empresa certa ou excluir.
         </div>
       )}
 
@@ -971,7 +971,7 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
     movido_empresa:        { icon: "→",  color: "#2563eb", bg: "#eff6ff",  label: "Movido" },
     duplicata:             { icon: "⚠",  color: "#c2410c", bg: "#fff7ed",  label: "Duplicata" },
     nao_reconhecido:       { icon: "?",  color: "#d97706", bg: "#fefce8",  label: "Não identificado" },
-    aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff",  label: "Fila Global" },
+    aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff",  label: "Aguardando Aprovação" },
     baixado:               { icon: "⬇", color: "#6b7280", bg: "#f9fafb",  label: "Baixado" },
     erro:                  { icon: "✗",  color: "#b91c1c", bg: "#fef2f2",  label: "Erro" },
   } as Record<string, { icon: string; color: string; bg: string; label: string }>)[status]
