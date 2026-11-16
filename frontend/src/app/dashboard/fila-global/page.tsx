@@ -28,6 +28,7 @@ type DocFila = {
   cnpj_extraido: string | null;
   detectado_em: string;
   empresa: { id: string; nome: string; codigo: string } | null;
+  empresa_sugerida_por_conta?: { id: string; nome: string | null } | null;
 };
 
 type Empresa = { id: string; nome: string; codigo: string; cnpj: string | null };
@@ -44,9 +45,12 @@ export default function FilaGlobalPage() {
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [loading, setLoading] = useState(true);
   const [acoes, setAcoes] = useState<Record<string, AcaoState>>({});
+  const [autoRoteando, setAutoRoteando] = useState(false);
+  const [autoRoteadoMsg, setAutoRoteadoMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    Promise.all([
+  function carregarDados() {
+    setLoading(true);
+    return Promise.all([
       fetch(`${API}/fila-global`).then((r) => (r.ok ? r.json() : [])),
       fetch(`${API}/empresas`).then((r) => (r.ok ? r.json() : [])),
     ]).then(([docsData, empresasData]) => {
@@ -58,7 +62,9 @@ export default function FilaGlobalPage() {
       }
       setAcoes(init);
     }).finally(() => setLoading(false));
-  }, []);
+  }
+
+  useEffect(() => { carregarDados(); }, []);
 
   const pendentes = docs.filter((d) => !acoes[d.id]?.finalizada);
 
@@ -78,6 +84,43 @@ export default function FilaGlobalPage() {
       if (r.ok) {
         const dest = empresas.find((e) => e.id === a.empresaDestId);
         setAcao(doc.id, { finalizada: `Movido → ${dest?.nome ?? a.empresaDestId}`, emAndamento: null });
+      } else {
+        alert("Erro ao mover. Tente novamente.");
+        setAcao(doc.id, { emAndamento: null });
+      }
+    } catch {
+      setAcao(doc.id, { emAndamento: null });
+    }
+  }
+
+  async function handleAutoRotear() {
+    setAutoRoteando(true);
+    setAutoRoteadoMsg(null);
+    try {
+      const r = await fetch(`${API}/fila-global/auto-rotear`, { method: "POST" });
+      const data = await r.json();
+      const n = data.roteados?.length ?? 0;
+      setAutoRoteadoMsg(
+        n > 0
+          ? `${n} documento${n !== 1 ? "s" : ""} roteado${n !== 1 ? "s" : ""} automaticamente.`
+          : "Nenhum documento pôde ser roteado automaticamente.",
+      );
+      await carregarDados();
+    } catch {
+      setAutoRoteadoMsg("Erro ao auto-rotear. Tente novamente.");
+    } finally {
+      setAutoRoteando(false);
+    }
+  }
+
+  async function handleMoverPorConta(doc: DocFila) {
+    const sug = doc.empresa_sugerida_por_conta;
+    if (!sug?.id) return;
+    setAcao(doc.id, { emAndamento: "mover" });
+    try {
+      const r = await fetch(`${API}/documentos/${doc.id}/mover-empresa/${sug.id}`, { method: "POST" });
+      if (r.ok) {
+        setAcao(doc.id, { finalizada: `Movido → ${sug.nome ?? sug.id}`, emAndamento: null });
       } else {
         alert("Erro ao mover. Tente novamente.");
         setAcao(doc.id, { emAndamento: null });
@@ -136,10 +179,33 @@ export default function FilaGlobalPage() {
   return (
     <div style={{ padding: "32px 32px", maxWidth: 860 }}>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Fila Global</h1>
-        <p style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>
-          Arquivos que não foram vinculados a nenhuma empresa durante o envio. Mova para a empresa certa ou exclua.
-        </p>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Fila Global</h1>
+            <p style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>
+              Arquivos que não foram vinculados a nenhuma empresa durante o envio. Mova para a empresa certa ou exclua.
+            </p>
+          </div>
+          {pendentes.length > 0 && (
+            <button
+              onClick={handleAutoRotear}
+              disabled={autoRoteando}
+              style={{
+                padding: "8px 16px", background: autoRoteando ? "#e5e7eb" : "#0c1a2e",
+                color: autoRoteando ? "#9ca3af" : "#c4a030",
+                border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13,
+                cursor: autoRoteando ? "not-allowed" : "pointer", flexShrink: 0,
+              }}
+            >
+              {autoRoteando ? "Roteando…" : "⚡ Auto-rotear tudo"}
+            </button>
+          )}
+        </div>
+        {autoRoteadoMsg && (
+          <div style={{ marginTop: 10, padding: "8px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 13, color: "#16a34a" }}>
+            ✓ {autoRoteadoMsg}
+          </div>
+        )}
       </div>
 
       {pendentes.length === 0 ? (
@@ -187,6 +253,15 @@ export default function FilaGlobalPage() {
 
                   {/* Ações */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {/* Sugestão por banco+conta cadastrada */}
+                    {doc.empresa_sugerida_por_conta && !empresaAutoMatch && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 7, fontSize: 12 }}>
+                        <span style={{ flex: 1, color: "#7c3aed" }}>
+                          Conta cadastrada em: <strong>{doc.empresa_sugerida_por_conta.nome ?? doc.empresa_sugerida_por_conta.id}</strong>
+                        </span>
+                        <Btn onClick={() => handleMoverPorConta(doc)} loading={a?.emAndamento === "mover"} label={`→ Mover para ${doc.empresa_sugerida_por_conta.nome ?? "empresa"}`} color="#7c3aed" />
+                      </div>
+                    )}
                     {/* Botão de mover automático pelo CNPJ */}
                     {empresaAutoMatch && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 7, fontSize: 12 }}>

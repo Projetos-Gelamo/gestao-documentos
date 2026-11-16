@@ -309,6 +309,8 @@ async def scan_upload(
     # Lookup global: conta_bancaria de OUTRAS empresas → sugere empresa certa no scan
     # Chave dupla: "banco|conta_digits" (exato) e "|conta_digits" (fallback se banco difere)
     conta_empresa_map: dict[str, tuple[str, str | None]] = {}
+    # Mapa de sufixo para OFX que combina agência+conta sem separador (ex: "0143118107" → "118107")
+    conta_suffix_map: dict[str, tuple[str, str | None]] = {}
     try:
         cb_res = (
             supabase.schema("gestao_docs").from_("conta_bancaria")
@@ -326,6 +328,9 @@ async def scan_upload(
                 conta_empresa_map[f"{b}|{c}"] = (eid, nome)
                 # Chave só por conta (fallback quando nome do banco varia entre PDF e BD)
                 conta_empresa_map.setdefault(f"|{c}", (eid, nome))
+                # Sufixo: OFX pode emitir agência+conta como string única
+                if len(c) >= 5:
+                    conta_suffix_map.setdefault(c, (eid, nome))
     except Exception as exc:
         logger.warning("upload scan: falha ao carregar conta_empresa_map: %s", exc)
 
@@ -384,6 +389,13 @@ async def scan_upload(
                     match = conta_empresa_map.get(f"|{c}")
                 if match:
                     break
+            # Fallback por containment: OFX combina agência+conta sem separador
+            # "0143118107" contém "118107" (BD) e "118107" está contido em "0143118107"
+            if not match and len(c_full) >= 5:
+                for suf_c, suf_val in conta_suffix_map.items():
+                    if len(suf_c) >= 5 and (suf_c in c_full or c_full in suf_c):
+                        match = suf_val
+                        break
             if match:
                 empresa_sugerida_id, empresa_sugerida_nome = match
 
