@@ -21,11 +21,33 @@ function mesAtual() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+type PreviewState = { docId: string; docNome: string; url: string } | null;
+
 export default function AnnualView({ empresaId, empresaNome, inline }: { empresaId: string; empresaNome: string; inline?: boolean }) {
   const [ano, setAno] = useState(new Date().getFullYear());
   const [data, setData] = useState<VIsaoAnual | null>(null);
   const [loading, setLoading] = useState(true);
+  const [previewState, setPreviewState] = useState<PreviewState>(null);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const atual = mesAtual();
+
+  async function handleCellClick(docId: string, docNome: string) {
+    if (previewLoading) return;
+    setPreviewLoading(docId);
+    try {
+      const r = await fetch(`${API}/documentos/${docId}/preview`);
+      const d = await r.json();
+      if (d.url) {
+        setPreviewState({ docId, docNome, url: d.url });
+      } else {
+        alert("Não foi possível carregar o arquivo.");
+      }
+    } catch {
+      alert("Erro ao carregar preview.");
+    } finally {
+      setPreviewLoading(null);
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -103,6 +125,14 @@ export default function AnnualView({ empresaId, empresaNome, inline }: { empresa
         </div>
       )}
 
+      {previewState && (
+        <PreviewModal
+          url={previewState.url}
+          nome={previewState.docNome}
+          onClose={() => setPreviewState(null)}
+        />
+      )}
+
       {!loading && data && data.tipos.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", background: "white", borderRadius: 10, boxShadow: "0 1px 4px rgba(0,0,0,.08)", minWidth: 800 }}>
@@ -139,9 +169,23 @@ export default function AnnualView({ empresaId, empresaNome, inline }: { empresa
                       const isFuture = mk > atual;
                       const isCurrent = mk === atual;
                       const inaplicavel = mes?.aplicavel === false;
+                      const hasDoc = !!mes?.documento_id;
+                      const isLoadingThis = previewLoading === mes?.documento_id;
                       return (
-                        <td key={m} style={{ padding: "10px 8px", textAlign: "center" }} title={mes?.documento_nome || undefined}>
-                          <Cell recebido={mes?.recebido ?? false} future={isFuture} current={isCurrent} inaplicavel={inaplicavel} />
+                        <td
+                          key={m}
+                          style={{ padding: "10px 8px", textAlign: "center", cursor: hasDoc ? "pointer" : "default" }}
+                          title={mes?.documento_nome || undefined}
+                          onClick={hasDoc && mes?.documento_id ? () => handleCellClick(mes.documento_id!, mes.documento_nome || "arquivo") : undefined}
+                        >
+                          <Cell
+                            recebido={mes?.recebido ?? false}
+                            future={isFuture}
+                            current={isCurrent}
+                            inaplicavel={inaplicavel}
+                            interactive={hasDoc}
+                            loading={isLoadingThis}
+                          />
                         </td>
                       );
                     })}
@@ -194,9 +238,16 @@ export default function AnnualView({ empresaId, empresaNome, inline }: { empresa
   );
 }
 
-function Cell({ recebido, future, current, inaplicavel }: { recebido: boolean; future: boolean; current: boolean; inaplicavel?: boolean }) {
+function Cell({ recebido, future, current, inaplicavel, interactive, loading }: {
+  recebido: boolean; future: boolean; current: boolean;
+  inaplicavel?: boolean; interactive?: boolean; loading?: boolean;
+}) {
+  const extra: React.CSSProperties = interactive
+    ? { boxShadow: "0 0 0 2px #16a34a44", outline: "none" }
+    : {};
+  if (loading) return <span style={{ ...cell("#dcfce7", "#16a34a"), ...extra, opacity: 0.6 }}>…</span>;
   if (inaplicavel) return <span style={cell("#f3f4f6", "#d1d5db")}>—</span>;
-  if (recebido) return <span style={cell("#dcfce7", "#16a34a")}>✓</span>;
+  if (recebido) return <span style={{ ...cell("#dcfce7", "#16a34a"), ...extra }}>✓</span>;
   if (future) return <span style={cell("#f3f4f6", "#d1d5db")}>—</span>;
   if (current) return <span style={cell("#fef3c7", "#d97706")}>⏳</span>;
   return <span style={cell("#fee2e2", "#ef4444")}>✗</span>;
@@ -204,6 +255,49 @@ function Cell({ recebido, future, current, inaplicavel }: { recebido: boolean; f
 
 function cell(bg: string, color: string): React.CSSProperties {
   return { display: "inline-block", width: 24, height: 24, lineHeight: "24px", textAlign: "center", borderRadius: 4, background: bg, color, fontSize: 11, fontWeight: 700 };
+}
+
+function PreviewModal({ url, nome, onClose }: { url: string; nome: string; onClose: () => void }) {
+  const ext = nome.split(".").pop()?.toLowerCase() || "";
+  const isImage = ["jpg", "jpeg", "png", "webp", "tiff", "bmp", "gif"].includes(ext);
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 9999, display: "flex", flexDirection: "column" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 20px", background: "rgba(0,0,0,0.5)", flexShrink: 0 }}>
+        <span style={{ color: "white", fontSize: 13, fontWeight: 500, maxWidth: "calc(100% - 160px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {nome}
+        </span>
+        <div style={{ display: "flex", gap: 10 }}>
+          <a
+            href={url}
+            download={nome}
+            style={{ padding: "5px 14px", background: "rgba(196,160,48,0.2)", color: "#c4a030", border: "1px solid #c4a030", borderRadius: 6, fontSize: 12, textDecoration: "none" }}
+          >
+            ⬇ Baixar
+          </a>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ padding: "5px 14px", background: "rgba(255,255,255,0.1)", color: "white", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 6, fontSize: 12, textDecoration: "none" }}
+          >
+            Abrir em nova aba
+          </a>
+          <button onClick={onClose} style={{ padding: "5px 14px", background: "white", color: "#0c1a2e", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+            ✕ Fechar
+          </button>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 16, overflowY: "auto" }}>
+        {isImage
+          ? <img src={url} alt={nome} style={{ maxWidth: "100%", maxHeight: "90vh", borderRadius: 6, boxShadow: "0 4px 24px rgba(0,0,0,0.5)" }} />
+          : <iframe src={url} title={nome} style={{ width: "100%", maxWidth: 900, height: "85vh", border: "none", borderRadius: 6, background: "white" }} />
+        }
+      </div>
+    </div>
+  );
 }
 
 function StatCard({ label, value, color }: { label: string; value: string; color: string }) {
