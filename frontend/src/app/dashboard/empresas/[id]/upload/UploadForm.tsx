@@ -360,7 +360,10 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     setFinalResults([]);
     setScanErroGeral(null);
     setScanProgress(0);
+    setPreviewState(null);
+    setPreviewLoading(null);
     setStep("selecao");
+    if (inputRef.current) inputRef.current.value = "";
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -547,7 +550,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         </div>
       )}
 
-      {previewState && (
+      {previewState && step === "resultado" && (
         <PreviewModal url={previewState.url} nome={previewState.nome} onClose={() => setPreviewState(null)} />
       )}
     </div>
