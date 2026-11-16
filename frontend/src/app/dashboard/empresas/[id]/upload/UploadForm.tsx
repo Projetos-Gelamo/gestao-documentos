@@ -363,6 +363,21 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     setStep("selecao");
   }
 
+  async function handleResolverDuplicata(docId: string, originalId: string | null, acao: "excluir" | "substituir" | "manter") {
+    try {
+      if (acao === "excluir") {
+        await fetch(`${API}/documentos/${docId}`, { method: "DELETE" });
+        setFinalResults(prev => prev.map(r => r.id === docId ? { ...r, status: "excluido" } : r));
+      } else if (acao === "substituir" && originalId) {
+        await fetch(`${API}/documentos/${docId}/substituir/${originalId}`, { method: "POST" });
+        setFinalResults(prev => prev.map(r => r.id === docId ? { ...r, status: "classificado" } : r));
+      } else if (acao === "manter") {
+        await fetch(`${API}/documentos/${docId}/manter-duplicata`, { method: "POST" });
+        setFinalResults(prev => prev.map(r => r.id === docId ? { ...r, status: "classificado" } : r));
+      }
+    } catch { alert("Erro ao processar ação. Tente novamente."); }
+  }
+
   async function handlePreview(docId: string) {
     setPreviewLoading(docId);
     try {
@@ -498,6 +513,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
                   { key: "aguardando_roteamento", label: "fila global",     bg: "#faf5ff", color: "#7c3aed", border: "#ddd6fe" },
                   { key: "nao_reconhecido",       label: "não identificado", bg: "#fefce8", color: "#d97706", border: "#fde68a" },
                   { key: "baixado",               label: "baixado",          bg: "#f9fafb", color: "#6b7280", border: "#e5e7eb" },
+                  { key: "excluido",              label: "excluído",         bg: "#f9fafb", color: "#9ca3af", border: "#e5e7eb" },
                 ].map(({ key, label, bg, color, border }) => {
                   const n = finalResults.filter((r) => r.status === key).length;
                   return n > 0 ? (
@@ -524,7 +540,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {finalResults.map((resultado) => (
-              <ResultadoRow key={resultado.id} resultado={resultado} onPreview={handlePreview} previewLoading={previewLoading} />
+              <ResultadoRow key={resultado.id} resultado={resultado} onPreview={handlePreview} previewLoading={previewLoading} onResolverDuplicata={handleResolverDuplicata} />
             ))}
           </div>
         </div>
@@ -959,12 +975,21 @@ function StepBar({ step }: { step: Step }) {
 
 // ── Resultado row ──────────────────────────────────────────────────────────
 
-function ResultadoRow({ resultado, onPreview, previewLoading }: {
+function ResultadoRow({ resultado, onPreview, previewLoading, onResolverDuplicata }: {
   resultado: ResultadoFinal;
   onPreview: (docId: string) => void;
   previewLoading: string | null;
+  onResolverDuplicata?: (docId: string, originalId: string | null, acao: "excluir" | "substituir" | "manter") => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [resolving, setResolving] = useState<string | null>(null);
+
+  async function handleAcao(acao: "excluir" | "substituir" | "manter") {
+    if (!onResolverDuplicata || resolving) return;
+    setResolving(acao);
+    try { await onResolverDuplicata(resultado.id, resultado.duplicata_de, acao); }
+    finally { setResolving(null); }
+  }
   const { status } = resultado;
   const cfg = ({
     classificado:          { icon: "✓",  color: "#16a34a", bg: "#f0fdf4",  label: "Classificado" },
@@ -974,6 +999,7 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
     aguardando_roteamento: { icon: "📋", color: "#7c3aed", bg: "#faf5ff",  label: "Aguardando Aprovação" },
     baixado:               { icon: "⬇", color: "#6b7280", bg: "#f9fafb",  label: "Baixado" },
     erro:                  { icon: "✗",  color: "#b91c1c", bg: "#fef2f2",  label: "Erro" },
+    excluido:              { icon: "✗",  color: "#9ca3af", bg: "#f9fafb",  label: "Excluído" },
   } as Record<string, { icon: string; color: string; bg: string; label: string }>)[status]
     ?? { icon: "·", color: "#6b7280", bg: "#f9fafb", label: status };
 
@@ -1021,6 +1047,21 @@ function ResultadoRow({ resultado, onPreview, previewLoading }: {
           {expanded ? "▲" : "▼"}
         </button>
       </div>
+      {status === "duplicata" && onResolverDuplicata && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #fed7aa", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: "#92400e", fontWeight: 600 }}>O que fazer?</span>
+          {[
+            { acao: "excluir" as const,    label: "🗑 Excluir novo",        color: "#6b7280", bg: "white", border: "#d1d5db" },
+            { acao: "substituir" as const, label: "🔄 Substituir original", color: "#c2410c", bg: "white", border: "#c2410c" },
+            { acao: "manter" as const,     label: "✓ Manter os 2",          color: "#16a34a", bg: "white", border: "#16a34a" },
+          ].map(({ acao, label, color, bg, border }) => (
+            <button key={acao} onClick={() => handleAcao(acao)} disabled={!!resolving}
+              style={{ padding: "4px 12px", background: bg, color, border: `1px solid ${border}`, borderRadius: 5, fontSize: 11, fontWeight: 600, cursor: resolving ? "not-allowed" : "pointer", opacity: resolving && resolving !== acao ? 0.5 : 1 }}>
+              {resolving === acao ? "…" : label}
+            </button>
+          ))}
+        </div>
+      )}
       {expanded && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e5e7eb" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 20px" }}>

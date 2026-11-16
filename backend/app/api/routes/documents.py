@@ -155,6 +155,16 @@ async def substituir_duplicata(documento_id: UUID, original_id: UUID):
     return {"ok": True, "original_excluido": str(original_id), "novo_classificado": str(documento_id)}
 
 
+@router.post("/{documento_id}/manter-duplicata", status_code=200)
+async def manter_duplicata(documento_id: UUID):
+    """Duplicata: mantém ambos os arquivos e classifica o novo."""
+    supabase = get_supabase()
+    supabase.schema("gestao_docs").from_("documento").update({
+        "status": "classificado",
+    }).eq("id", str(documento_id)).execute()
+    return {"ok": True, "novo_status": "classificado"}
+
+
 @router.post("/{documento_id}/mover-empresa/{empresa_destino_id}", status_code=200)
 async def mover_empresa(documento_id: UUID, empresa_destino_id: UUID):
     """Empresa errada: move o documento para a empresa correta e classifica."""
