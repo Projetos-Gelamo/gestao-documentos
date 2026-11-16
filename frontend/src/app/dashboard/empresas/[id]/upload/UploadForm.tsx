@@ -361,6 +361,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     setScanErroGeral(null);
     setScanProgress(0);
     setStep("selecao");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function handleResolverDuplicata(docId: string, originalId: string | null, acao: "excluir" | "substituir" | "manter") {

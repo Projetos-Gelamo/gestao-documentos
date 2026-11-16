@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
 
@@ -41,6 +42,7 @@ type AcaoState = {
 };
 
 export default function FilaGlobalPage() {
+  const router = useRouter();
   const [docs, setDocs] = useState<DocFila[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +66,11 @@ export default function FilaGlobalPage() {
     }).finally(() => setLoading(false));
   }
 
-  useEffect(() => { carregarDados(); }, []);
+  useEffect(() => {
+    router.refresh();
+    carregarDados();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const pendentes = docs.filter((d) => !acoes[d.id]?.finalizada);
 
@@ -170,7 +176,7 @@ export default function FilaGlobalPage() {
   if (loading) {
     return (
       <div style={{ padding: "40px 32px" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Fila Global</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Aguardando Aprovação</h1>
         <p style={{ fontSize: 13, color: "#9ca3af", marginTop: 8 }}>Carregando…</p>
       </div>
     );
@@ -186,20 +192,33 @@ export default function FilaGlobalPage() {
               Arquivos aguardando destino. Mova para a empresa certa ou exclua.
             </p>
           </div>
-          {pendentes.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <button
-              onClick={handleAutoRotear}
-              disabled={autoRoteando}
+              onClick={() => carregarDados()}
+              disabled={loading}
               style={{
-                padding: "8px 16px", background: autoRoteando ? "#e5e7eb" : "#0c1a2e",
-                color: autoRoteando ? "#9ca3af" : "#c4a030",
-                border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13,
-                cursor: autoRoteando ? "not-allowed" : "pointer", flexShrink: 0,
+                padding: "8px 14px", background: "white", color: "#6b7280",
+                border: "1px solid #d1d5db", borderRadius: 8, fontWeight: 600, fontSize: 13,
+                cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1,
               }}
             >
-              {autoRoteando ? "Roteando…" : "⚡ Auto-rotear tudo"}
+              ↺ Recarregar
             </button>
-          )}
+            {pendentes.length > 0 && (
+              <button
+                onClick={handleAutoRotear}
+                disabled={autoRoteando}
+                style={{
+                  padding: "8px 16px", background: autoRoteando ? "#e5e7eb" : "#0c1a2e",
+                  color: autoRoteando ? "#9ca3af" : "#c4a030",
+                  border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13,
+                  cursor: autoRoteando ? "not-allowed" : "pointer",
+                }}
+              >
+                {autoRoteando ? "Roteando…" : "⚡ Auto-rotear tudo"}
+              </button>
+            )}
+          </div>
         </div>
         {autoRoteadoMsg && (
           <div style={{ marginTop: 10, padding: "8px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 7, fontSize: 13, color: "#16a34a" }}>
