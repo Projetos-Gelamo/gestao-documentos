@@ -19,11 +19,11 @@ def get_classifier() -> DocumentClassifier:
     return ClaudeProvider()
 
 
-async def classify_document(text: str, filename: str) -> tuple[ClassificationResult, DocumentoStatus]:
+async def classify_document(text: str, filename: str, file_bytes: bytes | None = None) -> tuple[ClassificationResult, DocumentoStatus]:
     """Classify a document and determine its status based on confidence threshold."""
     classifier = get_classifier()
     try:
-        result = await classifier.classify(text=text, filename=filename)
+        result = await classifier.classify(text=text, filename=filename, file_bytes=file_bytes)
     except Exception as exc:
         logger.error("Erro no classificador para '%s': %s", filename, exc)
         return ClassificationResult(confidence=0.0, raw_response=str(exc)), DocumentoStatus.nao_reconhecido

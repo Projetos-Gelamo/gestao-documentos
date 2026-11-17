@@ -23,7 +23,7 @@ class OpenAIProvider(DocumentClassifier):
     def __init__(self):
         self._client = AsyncOpenAI(api_key=settings.openai_api_key)
 
-    async def classify(self, text: str, filename: str) -> ClassificationResult:
+    async def classify(self, text: str, filename: str, file_bytes: bytes | None = None) -> ClassificationResult:
         prompt = _load_prompt(filename, text)
         response = await self._client.chat.completions.create(
             model="gpt-4o-mini",

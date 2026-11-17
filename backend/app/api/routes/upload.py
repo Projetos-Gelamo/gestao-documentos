@@ -119,9 +119,9 @@ async def upload_documento(
         logger.error("Erro ao salvar no Storage: %s", exc)
         raise HTTPException(status_code=500, detail=f"Erro ao salvar arquivo: {exc}")
 
-    # Extrai texto e classifica
+    # Extrai texto e classifica (passa content para vision quando texto vazio)
     text = extract_text(content, filename)
-    result, status = await classify_document(text, filename)
+    result, status = await classify_document(text, filename, file_bytes=content)
 
     # Valida CNPJ: documento pertence a esta empresa?
     empresa_errada = False
@@ -360,7 +360,7 @@ async def scan_upload(
             continue
 
         text = extract_text(content, filename)
-        result, status = await classify_document(text, filename)
+        result, status = await classify_document(text, filename, file_bytes=content)
 
         # Sugere empresa pelo CNPJ extraído
         empresa_sugerida_id: str = empresa_id

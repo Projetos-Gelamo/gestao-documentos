@@ -1,0 +1,7 @@
+import sys
+import os
+
+# Adiciona o diretório raiz do backend ao path para que `from app.xxx import` funcione
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.main import app  # noqa: F401 — Vercel usa o objeto `app`

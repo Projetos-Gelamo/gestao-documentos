@@ -23,7 +23,7 @@ class GeminiProvider(DocumentClassifier):
         genai.configure(api_key=settings.gemini_api_key)
         self._model = genai.GenerativeModel("gemini-1.5-flash")
 
-    async def classify(self, text: str, filename: str) -> ClassificationResult:
+    async def classify(self, text: str, filename: str, file_bytes: bytes | None = None) -> ClassificationResult:
         prompt = _load_prompt(filename, text)
         response = await self._model.generate_content_async(prompt)
         raw = (response.text or "").strip()
