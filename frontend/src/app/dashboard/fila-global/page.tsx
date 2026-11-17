@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://gestao-documentos-production.up.railway.app";
@@ -43,6 +43,7 @@ type AcaoState = {
 
 export default function FilaGlobalPage() {
   const router = useRouter();
+  const lastLoadRef = useRef(0);
   const [docs, setDocs] = useState<DocFila[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,10 +52,11 @@ export default function FilaGlobalPage() {
   const [autoRoteadoMsg, setAutoRoteadoMsg] = useState<string | null>(null);
 
   function carregarDados() {
+    lastLoadRef.current = Date.now();
     setLoading(true);
     return Promise.all([
-      fetch(`${API}/fila-global`).then((r) => (r.ok ? r.json() : [])),
-      fetch(`${API}/empresas`).then((r) => (r.ok ? r.json() : [])),
+      fetch(`${API}/fila-global`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])),
+      fetch(`${API}/empresas`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])),
     ]).then(([docsData, empresasData]) => {
       setDocs(docsData);
       setEmpresas(empresasData);
@@ -71,6 +73,15 @@ export default function FilaGlobalPage() {
     carregarDados();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Recarrega quando a página é restaurada do router cache do Next.js
+  // (useEffect com [] não re-executa nesse caso; este detecta a staleness)
+  useEffect(() => {
+    if (Date.now() - lastLoadRef.current > 5000) {
+      carregarDados();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
 
   const pendentes = docs.filter((d) => !acoes[d.id]?.finalizada);
 

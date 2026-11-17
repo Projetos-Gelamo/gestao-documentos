@@ -95,6 +95,7 @@ type ResultadoFinal = {
 
 export default function UploadForm({ empresaId, empresaNome }: { empresaId: string; empresaNome: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [uploadKey, setUploadKey] = useState(0);
   const [step, setStep] = useState<Step>("selecao");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [scanProgress, setScanProgress] = useState(0);
@@ -363,6 +364,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     setPreviewState(null);
     setPreviewLoading(null);
     setStep("selecao");
+    setUploadKey((k) => k + 1);
     if (inputRef.current) inputRef.current.value = "";
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -411,7 +413,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
 
       {/* ── Etapa 1: Seleção ── */}
       {(step === "selecao" || step === "scan_loading") && (
-        <div>
+        <div key={uploadKey}>
           <div
             onClick={() => step === "selecao" && inputRef.current?.click()}
             onDragOver={(e) => e.preventDefault()}
