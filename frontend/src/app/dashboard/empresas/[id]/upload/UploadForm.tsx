@@ -99,6 +99,8 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
   const [step, setStep] = useState<Step>("selecao");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [scanProgress, setScanProgress] = useState(0);
+  const [scanLento, setScanLento] = useState(false);
+  const scanLentoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scanErroGeral, setScanErroGeral] = useState<string | null>(null);
   const [erros, setErros] = useState<ScanArquivo[]>([]);
 
@@ -125,6 +127,9 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     setStep("scan_loading");
     setScanProgress(0);
     setScanErroGeral(null);
+    setScanLento(false);
+    if (scanLentoTimerRef.current) clearTimeout(scanLentoTimerRef.current);
+    scanLentoTimerRef.current = setTimeout(() => setScanLento(true), 15000);
 
     const allArquivos: ScanArquivo[] = [];
 
@@ -158,6 +163,9 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
         });
       }
     }
+
+    if (scanLentoTimerRef.current) { clearTimeout(scanLentoTimerRef.current); scanLentoTimerRef.current = null; }
+    setScanLento(false);
 
     // Separa erros e monta ContaCards
     const errosList = allArquivos.filter((a) => a.status === "erro" || !!a.erro);
@@ -444,6 +452,11 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
                 <p style={{ fontSize: 11, color: "#9ca3af" }}>
                   {Math.round((scanProgress / selectedFiles.length) * 100)}% — a IA está lendo e extraindo as informações
                 </p>
+                {scanLento && (
+                  <p style={{ fontSize: 12, color: "#c4a030", marginTop: 10, fontWeight: 500 }}>
+                    ⏳ Aguarde, o servidor está sendo iniciado — isso pode levar até 30 segundos na primeira vez.
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -914,7 +927,7 @@ function ArquivosRevisaoStep({
       {totalFilaGlobal > 0 && (
         <div style={{ marginBottom: 24, padding: "10px 14px", background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 8, fontSize: 12, color: "#7c3aed" }}>
           <strong>{totalFilaGlobal} arquivo{totalFilaGlobal !== 1 ? "s" : ""}</strong> irá{totalFilaGlobal !== 1 ? "o" : ""} para Aguardando Aprovação após o envio.
-          Acesse <Link href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>Aguardando Aprovação</Link> para mover para a empresa certa ou excluir.
+          Acesse <a href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>Aguardando Aprovação</a> para mover para a empresa certa ou excluir.
         </div>
       )}
 

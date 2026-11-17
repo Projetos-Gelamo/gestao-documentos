@@ -47,6 +47,7 @@ export default function FilaGlobalPage() {
   const [docs, setDocs] = useState<DocFila[]>([]);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erroCarregar, setErroCarregar] = useState<string | null>(null);
   const [acoes, setAcoes] = useState<Record<string, AcaoState>>({});
   const [autoRoteando, setAutoRoteando] = useState(false);
   const [autoRoteadoMsg, setAutoRoteadoMsg] = useState<string | null>(null);
@@ -54,10 +55,15 @@ export default function FilaGlobalPage() {
   function carregarDados() {
     lastLoadRef.current = Date.now();
     setLoading(true);
-    return Promise.all([
-      fetch(`${API}/fila-global`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])),
-      fetch(`${API}/empresas`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])),
+    setErroCarregar(null);
+    Promise.all([
+      fetch(`${API}/fila-global`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => null),
+      fetch(`${API}/empresas`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : [])).catch(() => []),
     ]).then(([docsData, empresasData]) => {
+      if (docsData === null) {
+        setErroCarregar("Não foi possível carregar os dados. Verifique sua conexão e tente novamente.");
+        return;
+      }
       setDocs(docsData);
       setEmpresas(empresasData);
       const init: Record<string, AcaoState> = {};
@@ -189,6 +195,24 @@ export default function FilaGlobalPage() {
       <div style={{ padding: "40px 32px" }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Aguardando Aprovação</h1>
         <p style={{ fontSize: 13, color: "#9ca3af", marginTop: 8 }}>Carregando…</p>
+      </div>
+    );
+  }
+
+  if (erroCarregar) {
+    return (
+      <div style={{ padding: "40px 32px" }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#0c1a2e" }}>Aguardando Aprovação</h1>
+        <div style={{ marginTop: 16, padding: "14px 18px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10 }}>
+          <p style={{ fontSize: 14, color: "#b91c1c", fontWeight: 600, marginBottom: 6 }}>Erro ao carregar dados</p>
+          <p style={{ fontSize: 13, color: "#7f1d1d", marginBottom: 12 }}>{erroCarregar}</p>
+          <button
+            onClick={() => carregarDados()}
+            style={{ padding: "8px 18px", background: "#b91c1c", color: "white", border: "none", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+          >
+            Tentar novamente
+          </button>
+        </div>
       </div>
     );
   }
