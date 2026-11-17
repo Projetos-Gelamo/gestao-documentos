@@ -163,6 +163,13 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
     const errosList = allArquivos.filter((a) => a.status === "erro" || !!a.erro);
     const validos = allArquivos.filter((a) => a.status !== "erro" && !a.erro);
 
+    if (validos.length === 0) {
+      setScanErroGeral(errosList[0]?.erro || "Nenhum arquivo foi processado com sucesso. Tente novamente.");
+      setErros(errosList);
+      setStep("selecao");
+      return;
+    }
+
     setErros(errosList);
     setContas(buildContaCards(validos, empresaId));
     setStep("contas_identificacao");
@@ -414,14 +421,15 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
       {/* ── Etapa 1: Seleção ── */}
       {(step === "selecao" || step === "scan_loading") && (
         <div key={uploadKey}>
-          <div
-            onClick={() => step === "selecao" && inputRef.current?.click()}
+          <label
+            htmlFor={`file-input-${uploadKey}`}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); if (step === "selecao" && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
-            style={{ border: "2px dashed #c4a030", borderRadius: 10, padding: "28px 20px", textAlign: "center", cursor: step === "selecao" ? "pointer" : "default", background: "#faf8f4" }}
+            style={{ display: "block", border: "2px dashed #c4a030", borderRadius: 10, padding: "28px 20px", textAlign: "center", cursor: step === "selecao" ? "pointer" : "default", background: "#faf8f4" }}
           >
-            <input ref={inputRef} type="file" multiple style={{ display: "none" }}
+            <input id={`file-input-${uploadKey}`} ref={inputRef} type="file" multiple style={{ display: "none" }}
               accept=".pdf,.png,.jpg,.jpeg,.webp,.tiff,.bmp,.xml,.ofx,.ofc,.xlsx,.xls,.csv"
+              disabled={step !== "selecao"}
               onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
             />
             {step === "scan_loading" ? (
@@ -444,7 +452,7 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
                 <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>Vários arquivos de uma vez — PDF, Excel, XML, OFX, imagens</p>
               </>
             )}
-          </div>
+          </label>
 
           {scanErroGeral && (
             <div style={{ marginTop: 12, padding: "10px 14px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, fontSize: 13, color: "#b91c1c" }}>
@@ -532,9 +540,9 @@ export default function UploadForm({ empresaId, empresaNome }: { empresaId: stri
               {finalResults.some((r) => r.status === "aguardando_roteamento") && (
                 <p style={{ fontSize: 12, color: "#7c3aed", marginTop: 8 }}>
                   Arquivos na fila global aguardam destino.{" "}
-                  <Link href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>
+                  <a href="/dashboard/fila-global" style={{ color: "#7c3aed", fontWeight: 600 }}>
                     Ir para Aguardando Aprovação →
-                  </Link>
+                  </a>
                 </p>
               )}
             </div>
