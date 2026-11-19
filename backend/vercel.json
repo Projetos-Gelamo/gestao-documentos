@@ -17,10 +17,6 @@
   ],
   "crons": [
     {
-      "path": "/cron/monitor",
-      "schedule": "*/5 * * * *"
-    },
-    {
       "path": "/cron/report",
       "schedule": "0 10 * * 1-5"
     }
